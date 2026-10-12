@@ -1,0 +1,8 @@
+{
+  "id": "requests",
+  "name": "Requests",
+  "description": "Build, send and save HTTP requests in a pane: collections, environments and {{variables}}, pre- and post-request scripts, cURL import and export, history. Formerly Deck's HTTP tab; saved collections carry over.",
+  "icon": "Send",
+  "version": "1.0.0",
+  "minDeck": "1.1.0"
+}
