@@ -212,7 +212,7 @@ export default function ResponseView({
               // Sandboxed: a response body is untrusted and this renders it as HTML. No
               // allow-scripts and no allow-same-origin, so it cannot run anything or reach
               // Deck's own origin.
-              <iframe title="Response preview" sandbox="" srcDoc={result.body} className="h-full w-full bg-white" />
+              <iframe title="Response preview" sandbox="" srcDoc={result.body} className="h-full w-full bg-[#fff]" />
             ) : (
               <CodeBox value={shown} language={lang} readOnly folding />
             )
@@ -260,7 +260,7 @@ function MediaBody({ result, kind }: { result: HttpResult; kind: "image" | "vide
 
   if (kind === "pdf") {
     // Sandboxed for the same reason the HTML preview is: a response body is untrusted.
-    return <iframe title="Response PDF" sandbox="" src={src} className="h-full w-full bg-white" />;
+    return <iframe title="Response PDF" sandbox="" src={src} className="h-full w-full bg-[#fff]" />;
   }
 
   return (
