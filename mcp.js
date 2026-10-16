@@ -1,4 +1,4 @@
-// plugins/requests/src/mcpstore.ts
+// src/mcpstore.ts
 var deck;
 var readJson = (name, fallback) => deck.readJson(name, fallback);
 var writeJson = (name, data) => deck.writeJson(name, data);
@@ -77,7 +77,7 @@ function init(d) {
 }
 var METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
-// plugins/requests/src/mcp.ts
+// src/mcp.ts
 var ok = (text) => ({ content: [{ type: "text", text }] });
 var json = (v) => ok(JSON.stringify(v, null, 2));
 function edit(fn) {
