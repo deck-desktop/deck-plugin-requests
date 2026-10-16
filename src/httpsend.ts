@@ -68,5 +68,5 @@ export const stopHttpSend = listen<{ job: string; request: string; saveTo?: stri
     // fails, or the caller waits out the full 75s timeout for nothing.
     body = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
   }
-  await httpSendReply(job, body).catch(() => {});
+  await httpSendReply(job, body).catch((e) => console.warn("[requests] reply to MCP send failed", e));
 }).catch(() => {});

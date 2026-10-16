@@ -453,8 +453,10 @@ export default function Requests() {
   const copyCurl = (id: string, resolved: boolean) => {
     const r = col?.requests[id];
     if (!r) return;
-    void navigator.clipboard.writeText(toCurl(r, resolved ? vars : undefined)).catch(() => {});
-    setToast(resolved ? "Copied with environment values filled in." : "Copied as cURL.");
+    navigator.clipboard.writeText(toCurl(r, resolved ? vars : undefined)).then(
+      () => setToast(resolved ? "Copied with environment values filled in." : "Copied as cURL."),
+      () => setToast("Could not copy to the clipboard."),
+    );
   };
 
   /** Paste a curl command as a new scratch tab. Not saved: it is a paste, not a decision. */

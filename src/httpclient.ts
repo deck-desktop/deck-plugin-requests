@@ -175,7 +175,7 @@ export function migrate(c: Collections): Collections {
 }
 
 export const saveCollections = (c: Collections) =>
-  configWrite(STORE, JSON.stringify(c, null, 2)).catch(() => {});
+  configWrite(STORE, JSON.stringify(c, null, 2)).catch((e) => console.warn("[requests] collections save failed", e));
 
 // ---- tree ------------------------------------------------------------------
 //
@@ -648,4 +648,4 @@ export async function loadHistory(): Promise<HistoryEntry[]> {
 }
 
 export const saveHistory = (h: HistoryEntry[]) =>
-  configWrite(HISTORY, JSON.stringify(h.slice(0, HISTORY_CAP), null, 2)).catch(() => {});
+  configWrite(HISTORY, JSON.stringify(h.slice(0, HISTORY_CAP), null, 2)).catch((e) => console.warn("[requests] history save failed", e));

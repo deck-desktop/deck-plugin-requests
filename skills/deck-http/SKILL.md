@@ -13,7 +13,7 @@ description: >
 
 CRUD over the Requests plugin's stored data through `requests_*` MCP tools, which exist only
 while the plugin is installed. No IPC: the tools edit
-`%APPDATA%\Deck\requests-collections.json` and Deck's file watcher applies the change live, so the
+`%APPDATA%\Deck\data\requests\requests-collections.json` and Deck's file watcher applies the change live, so the
 app updates while it is open.
 
 ## The model

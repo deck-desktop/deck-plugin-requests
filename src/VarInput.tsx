@@ -65,7 +65,32 @@ export default function VarInput({
     const el = ref.current;
     if (!el || el.textContent === value) return;
     el.innerHTML = paint(value, known);
+    // A value from outside (another request opened): its own text, so no undo into the last one.
+    hist.current = { past: [], future: [], last: { t: value, c: value.length } };
   }, [value, known]);
+
+  // Undo kept here, because the browser's own cannot survive the field: every repaint rewrites
+  // innerHTML, and that empties the native undo stack, so Ctrl+Z did nothing at all.
+  type Snap = { t: string; c: number };
+  const hist = useRef<{ past: Snap[]; future: Snap[]; last: Snap }>({ past: [], future: [], last: { t: value, c: value.length } });
+  const remember = (next: Snap) => {
+    const h = hist.current;
+    if (next.t === h.last.t) return;
+    h.past = [...h.past.slice(-199), h.last];
+    h.future = [];
+    h.last = next;
+  };
+  const step = (back: boolean) => {
+    const el = ref.current;
+    const h = hist.current;
+    const to = (back ? h.past : h.future).pop();
+    if (!el || !to) return;
+    (back ? h.future : h.past).push(h.last);
+    h.last = to;
+    el.innerHTML = paint(to.t, known);
+    setCaret(el, to.c);
+    onChange(to.t);
+  };
 
   // Re-paint after typing: the browser inserts plain text, so tokens the user has just finished
   // typing stay unstyled until we rebuild the markup and put the caret back where it was.
@@ -79,6 +104,7 @@ export default function VarInput({
     if (!el) return;
     const text = el.textContent ?? "";
     const caret = getCaret(el);
+    remember({ t: text, c: caret });
     onChange(text);
 
     // Opening a popup while the caret sits inside an unclosed {{ … .
@@ -101,6 +127,7 @@ export default function VarInput({
     // so accepting a suggestion never leaves "{{name}}}}".
     const tail = text.slice(caret).replace(/^\s*\}\}/, "");
     const next = `${text.slice(0, pop.at)}{{${name}}}${tail}`;
+    remember({ t: next, c: pop.at + name.length + 4 });
     onChange(next);
     setPop(null);
     el.innerHTML = paint(next, known);
@@ -109,12 +136,18 @@ export default function VarInput({
 
   const acceptPlain = (text: string) => {
     const el = ref.current;
+    remember({ t: text, c: text.length });
     onChange(text);
     setPlainOpen(false);
     if (el) { el.innerHTML = paint(text, known); setCaret(el, text.length); }
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === "KeyZ" || e.code === "KeyY")) {
+      e.preventDefault();
+      step(e.code === "KeyZ" && !e.shiftKey);
+      return;
+    }
     if (plainOpen && plain.length) {
       if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => (s + 1) % plain.length); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => (s - 1 + plain.length) % plain.length); return; }
@@ -127,8 +160,9 @@ export default function VarInput({
       if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); accept(matches[sel].name); return; }
       if (e.key === "Escape") { e.preventDefault(); setPop(null); return; }
     }
-    // Single-line field: Enter sends rather than inserting a newline.
-    if (e.key === "Enter") { e.preventDefault(); onEnter?.(); }
+    // Single-line field: Enter sends rather than inserting a newline. Plain Enter only: Ctrl+Enter
+    // is the plugin's send binding, which also runs, so answering it here sent the request twice.
+    if (e.key === "Enter") { e.preventDefault(); if (!e.ctrlKey && !e.metaKey) onEnter?.(); }
   };
 
   return (
