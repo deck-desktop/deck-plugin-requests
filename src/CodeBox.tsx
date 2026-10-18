@@ -8,7 +8,7 @@
 // bracket matching and format-on-demand for free.
 import { useEffect, useRef } from "react";
 import { monaco } from "../shim/monaco.js";
-import { getEditorSettings, monacoOptionsFrom } from "../shim/ui.js";
+import { bindMonacoKey, getEditorSettings, monacoOptionsFrom } from "../shim/ui.js";
 import { registerTemplateVars, decorateTemplateVars } from "./monacovars";
 
 export default function CodeBox({
@@ -70,7 +70,8 @@ export default function CodeBox({
 
     const sub = ed.onDidChangeModelContent(() => onChangeRef.current?.(ed.getValue()));
 
-    ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current?.());
+    // Save on the chord Settings has for Deck's editor:save, following a rebind.
+    const unSave = bindMonacoKey(ed, monaco, "editor:save", () => onSaveRef.current?.());
 
     // {{variable}} colouring and completion. The providers are global and registered once; the
     // decorations are per-editor and refreshed on every edit.
@@ -88,7 +89,7 @@ export default function CodeBox({
     ro.observe(host.current);
 
     return () => {
-      sub.dispose(); varSub?.dispose(); decorations?.clear();
+      unSave(); sub.dispose(); varSub?.dispose(); decorations?.clear();
       ro.disconnect(); ed.dispose(); model.dispose(); edRef.current = null;
     };
     // Mount once. `value` and `language` are synced by the effects below; re-creating the editor
