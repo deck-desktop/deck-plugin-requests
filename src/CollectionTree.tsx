@@ -87,7 +87,15 @@ export default function CollectionTree({
       }}
     >
       {col.folders.filter((f) => f.parentId === null).length === 0 && (
-        <p className="px-2 py-3 text-xs text-text-muted">No collections yet.</p>
+        <div className="flex flex-col items-start gap-2 px-1 py-1">
+          <p className="px-1.5 text-[12px] leading-relaxed text-text-muted">
+            No collections yet. A collection holds saved requests and the folders that group them.
+          </p>
+          <button onClick={cb.onAddCollection}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-subtle bg-elev px-3 text-[12px] text-text-secondary transition-colors hover:border-strong hover:text-text-primary">
+            <FolderPlus size={14} />New collection
+          </button>
+        </div>
       )}
       {roots.map((f) => (
         <FolderNode key={f.id} folder={f} col={col} depth={0} visible={visible}
@@ -157,7 +165,7 @@ function FolderNode({
   if (renaming) {
     return (
       <>
-        <div className="flex items-center gap-1.5 py-1 pr-2" style={{ paddingLeft: 6 + depth * 14 }}>
+        <div className="flex h-6 items-center gap-1.5 pr-2" style={{ paddingLeft: 6 + depth * 14 }}>
           <span className="w-[13px] shrink-0" />
           <input
             autoFocus
@@ -168,7 +176,7 @@ function FolderNode({
               // Escape reverts; blur would otherwise commit whatever was half-typed.
               else if (e.key === "Escape") { setRenaming(false); e.preventDefault(); }
             }}
-            className="min-w-0 flex-1 rounded bg-elev px-1 text-sm text-text-primary outline-none ring-1 ring-[var(--accent)]"
+            className="h-6 min-w-0 flex-1 rounded-md border border-subtle bg-elev px-1.5 text-[12.5px] text-text-primary outline-none focus:border-[var(--accent)]"
           />
         </div>
         {kids}
@@ -235,7 +243,7 @@ function RequestNode({
   // draggable row takes the press that would start a drag. Same reason as FolderNode.
   if (renaming) {
     return (
-      <div className="flex items-center gap-1.5 py-1 pr-2" style={{ paddingLeft: 6 + depth * 14 }}>
+      <div className="flex h-6 items-center gap-1.5 pr-2" style={{ paddingLeft: 6 + depth * 14 }}>
         <span className="w-[13px] shrink-0" />
         <span className={`w-10 shrink-0 font-mono text-[10px] font-bold ${METHOD_TONE[req.method]}`}>{req.method}</span>
         <input
@@ -247,7 +255,7 @@ function RequestNode({
             // Escape reverts; blur would otherwise commit whatever was half-typed.
             else if (e.key === "Escape") { setRenaming(false); e.preventDefault(); }
           }}
-          className="min-w-0 flex-1 rounded bg-elev px-1 text-sm text-text-primary outline-none ring-1 ring-[var(--accent)]"
+          className="h-6 min-w-0 flex-1 rounded-md border border-subtle bg-elev px-1.5 text-[12.5px] text-text-primary outline-none focus:border-[var(--accent)]"
         />
       </div>
     );
@@ -283,7 +291,7 @@ function RequestNode({
       }
       label={req.name}
       trailing={cb.dirtyRequestIds.has(req.id)
-        ? <span className="ml-auto mr-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#e2c08d" }} title="Unsaved changes" />
+        ? <span className="ml-auto mr-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--git-modified)" }} title="Unsaved changes" />
         : undefined}
     />
   );

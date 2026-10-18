@@ -104,7 +104,7 @@ export default function KeyValueGrid({
                     <button
                       onClick={() => void pickAnyFile().then((p) => { if (p) set(i, { value: p }); })}
                       title="Choose a file"
-                      className="shrink-0 rounded p-1 text-text-muted transition hover:text-text-primary"
+                      className="grid size-5 shrink-0 place-items-center rounded text-text-muted transition-colors hover:bg-white/10 hover:text-text-primary"
                     >
                       <FolderOpen size={12} />
                     </button>
@@ -126,8 +126,9 @@ export default function KeyValueGrid({
                         ...(r.kind === "file" ? { filename: undefined, contentType: undefined } : {}),
                       })}
                       title={r.kind === "file" ? "Sending a file — click for text" : "Sending text — click for a file"}
-                      className={"rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition "
-                        + (r.kind === "file" ? "text-[var(--accent)]" : "text-text-muted hover:text-text-primary")}
+                      className={"h-5 rounded-md px-1.5 text-[11px] transition-colors "
+                        + (r.kind === "file" ? "text-text-primary" : "text-text-muted hover:bg-white/5 hover:text-text-primary")}
+                      style={r.kind === "file" ? { background: "var(--accent-soft)" } : undefined}
                     >
                       {r.kind === "file" ? "File" : "Text"}
                     </button>
@@ -139,7 +140,7 @@ export default function KeyValueGrid({
                   <button
                     onClick={() => commit(withBlank.filter((_, j) => j !== i))}
                     title="Remove"
-                    className="rounded p-1 text-text-muted opacity-0 transition hover:text-red-400 group-hover:opacity-100"
+                    className="grid size-5 place-items-center rounded text-text-muted opacity-0 transition hover:bg-white/10 hover:text-red-400 group-hover:opacity-100"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -157,7 +158,7 @@ function GridHeader({
   bulk, onToggleBulk, keyLabel, valueLabel, noBulk, extra,
 }: { bulk: boolean; onToggleBulk: () => void; keyLabel: string; valueLabel: string; noBulk?: boolean; extra?: React.ReactNode }) {
   return (
-    <div className="flex shrink-0 items-stretch border-b border-subtle text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+    <div className="flex shrink-0 items-stretch border-b border-subtle text-[11.5px] font-medium text-text-muted">
       <div className="w-9 shrink-0 border-r border-subtle" />
       <div className="flex-1 border-r border-subtle px-2 py-1.5">{keyLabel}</div>
       <div className="flex flex-[2] items-center px-2 py-1.5">
@@ -168,9 +169,13 @@ function GridHeader({
         <button
           onClick={onToggleBulk}
           title={bulk ? "Back to the grid" : "Bulk edit as text"}
-          className={"flex w-8 shrink-0 items-center justify-center transition hover:text-text-primary " + (bulk ? "text-accent" : "")}
+          className="flex w-8 shrink-0 items-center justify-center"
         >
-          <List size={12} />
+          {/* A toggle: lit, with the accent ring, while the text view is showing. */}
+          <span className={"grid size-5 place-items-center rounded transition-colors " + (bulk ? "text-text-primary" : "hover:bg-white/10 hover:text-text-primary")}
+            style={bulk ? { background: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent)" } : undefined}>
+            <List size={12} />
+          </span>
         </button>
       )}
     </div>
