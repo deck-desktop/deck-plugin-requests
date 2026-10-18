@@ -188,39 +188,37 @@ export default function VarInput({
         }
       />
       {plainOpen && plain.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-80 overflow-y-auto rounded-md border border-subtle py-1 shadow-card scroll-thin"
+        <div className={POP}
              style={{ background: "var(--bg-card)" }}>
           {plain.map((sg, i) => (
             <button
               key={sg.name}
               onMouseDown={(e) => { e.preventDefault(); acceptPlain(sg.name); }}
               onMouseEnter={() => setSel(i)}
-              className={"flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-xs " +
-                (i === sel ? "bg-elev text-text-primary" : "text-text-secondary")}
+              className={ITEM + (i === sel ? "bg-white/[0.06] text-text-primary" : "text-text-secondary")}
             >
               <span className="shrink-0 font-mono">{sg.name}</span>
               {sg.description && (
-                <span className="ml-auto max-w-[55%] truncate text-[10px] text-text-muted">{sg.description}</span>
+                <span className="ml-auto max-w-[55%] truncate text-[11px] text-text-muted">{sg.description}</span>
               )}
             </button>
           ))}
         </div>
       )}
       {pop && matches.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-80 overflow-y-auto rounded-md border border-subtle py-1 shadow-card scroll-thin"
+        <div className={POP}
              style={{ background: "var(--bg-card)" }}>
           {matches.map((e, i) => (
             <button
               key={e.name}
               onMouseDown={(ev) => { ev.preventDefault(); accept(e.name); }}
               onMouseEnter={() => setSel(i)}
-              className={"flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-xs " +
-                (i === sel ? "bg-elev text-text-primary" : "text-text-secondary")}
+              className={ITEM + (i === sel ? "bg-white/[0.06] text-text-primary" : "text-text-secondary")}
             >
               {/* Generators are tinted so they read as "computed at send time", not as a value
                   someone configured. */}
               <span className={"font-mono " + (e.dynamic ? "text-cyan-400" : "")}>{e.name}</span>
-              <span className="ml-auto max-w-[55%] truncate text-[10px] text-text-muted">{e.hint}</span>
+              <span className="ml-auto max-w-[55%] truncate text-[11px] text-text-muted">{e.hint}</span>
             </button>
           ))}
         </div>
@@ -228,6 +226,11 @@ export default function VarInput({
     </div>
   );
 }
+
+// The two completion popups, in Deck's menu shape. Positioned under the field rather than
+// portalled: they follow it as it scrolls with the grid, and close on blur anyway.
+const POP = "scroll-thin absolute left-0 top-full z-50 mt-1 max-h-56 w-80 animate-[menu-in_110ms_ease-out] overflow-y-auto rounded-[10px] border border-subtle p-1 shadow-2xl";
+const ITEM = "flex w-full items-baseline gap-2 rounded-[6px] px-2.5 py-1 text-left text-[12px] ";
 
 // ---- caret helpers ----------------------------------------------------------
 // Offsets are counted in plain-text characters across all child nodes, so they survive the

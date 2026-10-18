@@ -7,10 +7,11 @@
 // Collections live in %APPDATA%\Deck\requests-collections.json, deliberately not in the open
 // project — requests carry tokens and internal hostnames.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "../shim/react-dom.js";
 import { onKeys, useScope } from "../shim/ui.js";
 import {
   Plus, Trash2, FolderPlus, Loader2, Search, Globe, X, Upload, TerminalSquare, Download,
-  FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft,
+  FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft, Send,
 } from "lucide-react";
 import {
   loadCollections, saveCollections, cancelRequest, envVars, newRequest, newId,
@@ -21,8 +22,8 @@ import {
   type HistoryEntry,
 } from "./httpclient";
 import {
-  ContextMenu, useNarrow, useResize, ActivityBar, TabStrip, ConfirmDialog,
-  type MenuEntry, type ConfirmState,
+  ContextMenu, useNarrow, useResize, ActivityBar, TabStrip, ConfirmDialog, NamePrompt, toast,
+  type MenuEntry, type ConfirmState, type NamePromptState,
 } from "../shim/ui.js";
 
 /** The attribute components/dragrow marks a draggable row with. The ui shim forwards functions
@@ -91,15 +92,9 @@ export default function Requests() {
   const [respCollapsed, setRespCollapsed] = useState(false);
   const [editEnv, setEditEnv] = useState<string | null>(null); // environment open in the editor dialog
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
-  // One-line result for the file operations — they are silent otherwise, and a failed import
-  // that says nothing looks like a broken button.
-  const [toast, setToast] = useState("");
+  // The file operations report through Deck's toast — they are silent otherwise, and a failed
+  // import that says nothing looks like a broken button.
   const [exportAsk, setExportAsk] = useState<{ scope: "collection" | "workspace"; id: string; name: string } | null>(null);
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(""), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
   const [sidebarW, setSidebarW] = useState(saved0.sidebarW ?? 256); // px; the drag handle beside the sidebar resizes
   const asideRef = useRef<HTMLDivElement>(null);
   // In a narrow pane the sidebar is a drawer over the requests, opened from the tab strip, rather
@@ -454,8 +449,8 @@ export default function Requests() {
     const r = col?.requests[id];
     if (!r) return;
     navigator.clipboard.writeText(toCurl(r, resolved ? vars : undefined)).then(
-      () => setToast(resolved ? "Copied with environment values filled in." : "Copied as cURL."),
-      () => setToast("Could not copy to the clipboard."),
+      () => toast(resolved ? "Copied with environment values filled in." : "Copied as cURL.", "success"),
+      () => toast("Could not copy to the clipboard.", "error"),
     );
   };
 
@@ -463,7 +458,7 @@ export default function Requests() {
   const importCurl = async () => {
     const text = await navigator.clipboard.readText().catch(() => "");
     const req = text && parseCurl(text);
-    if (!req) { setToast("Clipboard does not hold a curl command."); return; }
+    if (!req) { toast("Clipboard does not hold a curl command.", "error"); return; }
     openScratch(req);
   };
 
@@ -491,9 +486,9 @@ export default function Requests() {
         ? exportWorkspace(col, ask.id, { includeSecrets })
         : exportCollection(col, ask.id, { includeSecrets });
       await fsWrite(path, JSON.stringify(file, null, 2));
-      setToast(includeSecrets ? "Exported with secrets." : "Exported without secrets.");
+      toast(includeSecrets ? "Exported with secrets." : "Exported without secrets.", "success");
     } catch (e) {
-      setToast(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast(`Export failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     }
   };
 
@@ -525,11 +520,11 @@ export default function Requests() {
           });
           // Tabs belong to the workspace that was open, and this switches away from it.
           setTabs([]); setActiveId(null);
-          setToast(`Imported "${file.name}" as a new workspace${file.secrets ? "" : " (no secrets in the file)"}.`);
+          toast(`Imported "${file.name}" as a new workspace${file.secrets ? "" : " (no secrets in the file)"}.`, "success");
         },
       });
     } catch (e) {
-      setToast(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     }
   };
 
@@ -539,7 +534,7 @@ export default function Requests() {
       if (!path) return;
       const file = parseExport(await fsRead(path));
       const wsId = col?.activeWorkspaceId;
-      if (!wsId) { setToast("No workspace to import into."); return; }
+      if (!wsId) { toast("No workspace to import into.", "error"); return; }
       const wsName = col.workspaces.find((w) => w.id === wsId)?.name;
       const sum = summarizeImport(col, file, wsId);
       setConfirm({
@@ -550,11 +545,11 @@ export default function Requests() {
         wide: true,
         onConfirm: () => {
           update((c) => importCollection(c, file, wsId, { withEnvironments: file.environments.length > 0 }));
-          setToast(`Imported "${file.name}"${file.secrets ? "" : " (no secrets in the file)"}.`);
+          toast(`Imported "${file.name}"${file.secrets ? "" : " (no secrets in the file)"}.`, "success");
         },
       });
     } catch (e) {
-      setToast(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+      toast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     }
   };
 
@@ -609,6 +604,63 @@ export default function Requests() {
         .filter((f) => !folderIds.includes(f.id))
         .map((f) => ({ ...f, children: f.children.filter((x) => !folderIds.includes(x) && !requestIds.includes(x)) })),
     };
+  });
+
+  // ---- confirmations ------------------------------------------------------
+  // None of these can be undone, so each asks first, saying what goes and what stays.
+
+  const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+
+  const askDeleteRequest = (id: string) => {
+    const r = col?.requests[id];
+    if (!r) return;
+    setConfirm({
+      title: `Delete the request ${r.name}?`,
+      body: tabs.some((t) => t.requestId === id)
+        ? "It is removed from its collection; its open tab stays, as an unsaved request."
+        : "It is removed from its collection; the rest of the collection stays.",
+      confirmLabel: "Delete",
+      onConfirm: () => deleteRequest(id),
+    });
+  };
+
+  const askDeleteFolder = (id: string) => {
+    const f = col?.folders.find((x) => x.id === id);
+    if (!col || !f) return;
+    const { folderIds, requestIds } = subtree(col.folders, id);
+    const what = f.parentId === null ? "collection" : "folder";
+    const inside = [
+      ...(requestIds.length ? [n(requestIds.length, "request")] : []),
+      ...(folderIds.length > 1 ? [n(folderIds.length - 1, "folder")] : []),
+    ];
+    setConfirm({
+      title: `Delete the ${what} ${f.name}?`,
+      body: inside.length
+        ? `This also deletes its ${inside.join(" and ")}; everything outside the ${what} stays.`
+        : `It is empty, so nothing else goes with it.`,
+      confirmLabel: "Delete",
+      onConfirm: () => deleteFolder(id),
+    });
+  };
+
+  const askDeleteWorkspace = (id: string) => {
+    const w = col?.workspaces.find((x) => x.id === id);
+    if (!col || !w) return;
+    const cols = col.folders.filter((f) => f.workspaceId === id && f.parentId === null).length;
+    const envs = col.environments.filter((e) => e.workspaceId === id).length;
+    setConfirm({
+      title: `Delete the workspace ${w.name}?`,
+      body: `This also deletes its ${n(cols, "collection")} and ${n(envs, "environment")}; your other workspaces stay.`,
+      confirmLabel: "Delete",
+      onConfirm: () => deleteWorkspace(id),
+    });
+  };
+
+  const askClearHistory = () => setConfirm({
+    title: "Clear the history?",
+    body: `This removes ${history.length === 1 ? "the one sent request" : `all ${history.length} sent requests`} from the list; saved requests in your collections stay.`,
+    confirmLabel: "Clear history",
+    onConfirm: () => { setHistory([]); void saveHistory([]); },
   });
 
   if (!col) return <div className="flex h-full items-center justify-center text-sm text-text-muted">Loading…</div>;
@@ -705,7 +757,7 @@ export default function Requests() {
                 onSwitch={switchWorkspace}
                 onAdd={addWorkspace}
                 onRename={(id, name) => update((c) => ({ ...c, workspaces: c.workspaces.map((w) => (w.id === id ? { ...w, name } : w)) }))}
-                onDelete={deleteWorkspace}
+                onDelete={askDeleteWorkspace}
                 onExport={exportWorkspaceFile}
                 onImport={() => void importWorkspaceFile()}
                 onMenu={(x, y, items) => setMenu({ x, y, items, alignRight: true })}
@@ -715,7 +767,7 @@ export default function Requests() {
 
           {rail === "history" ? (
             <>
-              <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-subtle px-2 text-[11px] text-text-muted">
+              <div className="flex h-9 shrink-0 items-center gap-1.5 px-2.5 text-[11.5px] text-text-muted">
                 <span className="min-w-0 flex-1 truncate">
                   {history.length === 0
                     ? "No requests sent yet"
@@ -723,46 +775,48 @@ export default function Requests() {
                 </span>
                 {history.length > 0 && (
                   <button
-                    onClick={() => { setHistory([]); void saveHistory([]); }}
+                    onClick={askClearHistory}
                     title="Clear history"
-                    className="shrink-0 transition hover:text-red-400"
+                    className={toolDangerBtn}
                   >
                     <Trash2 size={14} />
                   </button>
                 )}
               </div>
-              <HistoryPanel history={history} onOpen={(r) => openScratch(r)} />
+              <HistoryPanel history={history} onOpen={(r) => openScratch(r)} onNew={() => openScratch()} />
             </>
           ) : (
             <>
-              {/* h-8 on every view's sub-header row, so the list below always starts at the
+              {/* h-9 on every view's sub-header row, so the list below always starts at the
                   same y and switching views does not shift the panel. */}
-              <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-subtle px-2">
-                <Search size={11} className="shrink-0 text-text-muted" />
-                <input
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Filter requests…"
-                  className="min-w-0 flex-1 bg-transparent py-0.5 text-xs text-text-primary outline-none placeholder:text-text-muted"
-                />
+              <div className="flex h-9 shrink-0 items-center gap-0.5 px-2">
+                <label className="mr-1 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-subtle bg-elev px-2 transition-colors focus-within:border-[var(--accent)]">
+                  <Search size={13} className="shrink-0 text-text-muted" />
+                  <input
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    placeholder="Filter requests…"
+                    className="min-w-0 flex-1 bg-transparent text-[12px] text-text-primary outline-none placeholder:text-text-muted"
+                  />
+                </label>
                 <button
                   onClick={() => void importCurl()}
                   title="Paste a curl command from the clipboard as a new request"
-                  className="shrink-0 text-text-muted transition hover:text-text-primary"
+                  className={toolBtn}
                 >
                   <TerminalSquare size={14} />
                 </button>
                 <button
                   onClick={() => void importCollectionFile()}
                   title="Import a collection file"
-                  className="shrink-0 text-text-muted transition hover:text-text-primary"
+                  className={toolBtn}
                 >
                   <Upload size={14} />
                 </button>
                 <button
                   onClick={addCollection}
                   title="New collection"
-                  className="shrink-0 text-text-muted transition hover:text-text-primary"
+                  className={toolBtn}
                 >
                   <FolderPlus size={14} />
                 </button>
@@ -781,8 +835,8 @@ export default function Requests() {
                     onAddCollection: addCollection,
                     onRename: renameFolder,
                     onRenameRequest: renameRequest,
-                    onDeleteFolder: deleteFolder,
-                    onDeleteRequest: deleteRequest,
+                    onDeleteFolder: askDeleteFolder,
+                    onDeleteRequest: askDeleteRequest,
                     onDuplicateRequest: duplicateRequest,
                     onCopyCurl: copyCurl,
                     onExportCollection: exportCollectionFile,
@@ -811,16 +865,15 @@ export default function Requests() {
         <div className="flex min-w-0 flex-1 flex-col" style={{ background: "var(--bg-panel-glass)" }}>
           {/* Open request tabs. Same strip as the editor's — see components/TabStrip. In a narrow
               pane the sidebar's toggle sits at its start. */}
-          <div className="flex min-w-0 items-stretch">
-          {narrow && (
-            <button onClick={() => setSideOpen((o) => !o)} title={sideOpen ? "Hide requests" : "Show requests"}
-              className="flex shrink-0 items-center border-b border-r border-subtle px-2.5 text-text-muted transition-colors hover:text-text-primary"
-              style={sideOpen ? { color: "var(--accent)" } : undefined}>
-              <PanelLeft size={15} />
-            </button>
-          )}
-          <div className="min-w-0 flex-1">
           <TabStrip
+            chip
+            leading={narrow && (
+              <button onClick={() => setSideOpen((o) => !o)} title={sideOpen ? "Hide requests" : "Show requests"}
+                className={"grid size-7 place-items-center rounded-lg transition-colors " + (sideOpen ? "text-text-primary" : "text-text-muted hover:bg-white/5 hover:text-text-primary")}
+                style={sideOpen ? { background: "var(--accent-soft)" } : undefined}>
+                <PanelLeft size={15} />
+              </button>
+            )}
             tabs={tabs.map((t) => ({
               id: t.id,
               title: t.draft.name,
@@ -836,30 +889,30 @@ export default function Requests() {
             onClose={closeTab}
             onReorder={moveTab}
             onDoubleClick={promoteTab}
-            trailing={
-              <button
-                onClick={() => openScratch()}
-                title="New request (unsaved)"
-                className="text-text-muted transition hover:text-text-primary"
-              >
-                <Plus size={14} />
-              </button>
-            }
+            onAdd={() => openScratch()}
+            addTitle="New request (unsaved)"
           />
-          </div>
-          </div>
 
           {!active || !tab ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-text-muted">
-              Select a request, or press + for a new one
+            <div className="scroll-thin flex flex-1 overflow-y-auto px-6">
+              <div className="m-auto flex w-full max-w-[420px] flex-col gap-3 py-8">
+                <div className="flex items-start gap-2.5 rounded-lg border border-subtle bg-elev px-3 py-3 text-[12px] leading-relaxed text-text-muted">
+                  <Send size={16} className="mt-0.5 shrink-0" />
+                  <span>No request open. Pick one from a collection, start a new one, or paste a curl command to turn it into a request.</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => openScratch()} className={primaryBtn}><Plus size={14} />New request</button>
+                  <button onClick={() => void importCurl()} className={secondaryBtn}><TerminalSquare size={14} />Paste a curl command</button>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
               {/* URL bar */}
-              <div className="flex shrink-0 items-center gap-2 border-b border-subtle px-3 py-2">
+              <div className="flex shrink-0 items-center gap-2 px-3 pb-1.5 pt-2.5">
                 <MethodPicker value={active.method} onChange={(method) => patchActive({ method })} />
 
-                <div className="flex h-8 min-w-0 flex-1 items-center rounded-md border border-strong bg-elev px-3">
+                <div className="flex h-8 min-w-0 flex-1 items-center rounded-lg border border-subtle bg-elev px-3 transition-colors focus-within:border-[var(--accent)]">
                   <VarInput
                     value={active.url}
                     onChange={(url) => patchActive({
@@ -879,19 +932,18 @@ export default function Requests() {
                   onClick={send}
                   disabled={busy || !active.url.trim()}
                   title="Send (Ctrl+Enter)"
-                  className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-5 text-xs font-semibold text-white transition disabled:opacity-40"
-                  style={{ background: "var(--accent)" }}
+                  className={primaryBtn}
                 >
-                  {busy && <Loader2 size={12} className="animate-spin" />}
+                  {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                   Send
                 </button>
                 <button
                   onClick={saveTab}
                   disabled={!dirty(tab)}
                   title="Save (Ctrl+S)"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-strong text-text-muted transition hover:text-text-primary disabled:opacity-30"
+                  className="grid size-8 shrink-0 place-items-center rounded-lg border border-subtle bg-elev text-text-secondary transition-colors hover:border-strong hover:text-text-primary disabled:opacity-40 disabled:hover:border-subtle"
                 >
-                  <Save size={13} />
+                  <Save size={14} />
                 </button>
               </div>
 
@@ -912,7 +964,7 @@ export default function Requests() {
                       }
                     >
                       {t}
-                      {n > 0 && <Badge on={reqTab === t}>{n}</Badge>}
+                      {n > 0 && <Badge>{n}</Badge>}
                       {t === "body" && active.bodyKind !== "none" && <Dot />}
                       {t === "auth" && active.auth.kind !== "none" && <Dot />}
                       {t === "scripts" && (active.preScript?.trim() || active.postScript?.trim()) && <Dot />}
@@ -922,7 +974,8 @@ export default function Requests() {
                 <input
                   value={active.name}
                   onChange={(e) => patchActive({ name: e.target.value })}
-                  className="ml-auto w-44 bg-transparent px-2 text-right text-xs text-text-muted outline-none focus:text-text-primary"
+                  title="Request name"
+                  className="ml-auto h-6 w-44 rounded-md border border-transparent bg-transparent px-2 text-right text-[12px] text-text-muted outline-none transition-colors placeholder:text-text-muted hover:border-subtle focus:border-[var(--accent)] focus:bg-elev focus:text-text-primary"
                   placeholder="Request name"
                 />
               </div>
@@ -933,7 +986,7 @@ export default function Requests() {
                   <div className="flex h-full flex-col">
                     {active.pathParams.length > 0 && (
                       <div className="shrink-0">
-                        <SectionLabel>Path Variables</SectionLabel>
+                        <SectionLabel>Path variables</SectionLabel>
                         <KeyValueGrid
                           rows={active.pathParams}
                           onChange={(pathParams) => patchActive({ pathParams })}
@@ -942,7 +995,7 @@ export default function Requests() {
                           readOnlyKeys
                           noAdd
                         />
-                        <SectionLabel>Query Params</SectionLabel>
+                        <SectionLabel>Query params</SectionLabel>
                       </div>
                     )}
                     <div className="min-h-0 flex-1">
@@ -983,7 +1036,7 @@ export default function Requests() {
                           });
                         }}
                         title="Add a common header"
-                        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-normal normal-case tracking-normal text-text-muted transition hover:bg-elev hover:text-text-primary"
+                        className="flex h-5 items-center gap-1 rounded px-1.5 text-[11px] font-normal text-text-muted transition-colors hover:bg-white/10 hover:text-text-primary"
                       >
                         <Plus size={11} /> Common
                       </button>
@@ -1020,46 +1073,40 @@ export default function Requests() {
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} alignRight={menu.alignRight} onClose={() => setMenu(null)} />}
 
-      {editEnv && <EnvDialog col={col} envId={editEnv} update={update} onClose={() => setEditEnv(null)} />}
+      {editEnv && <EnvDialog col={col} envId={editEnv} update={update} onClose={() => setEditEnv(null)}
+        confirm={setConfirm} asking={!!confirm} />}
 
       {confirm && <ConfirmDialog state={confirm} onClose={() => setConfirm(null)} />}
 
-      {exportAsk && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      {exportAsk && createPortal(
+        // Portalled, like Deck's own dialogs: a transformed ancestor would otherwise clip `fixed`.
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
              onClick={() => setExportAsk(null)}>
-          <div className="w-[380px] max-w-[90vw] rounded-lg border border-strong p-4 shadow-2xl"
+          <div className="w-[400px] max-w-[90vw] overflow-hidden rounded-[12px] border border-subtle shadow-2xl"
                style={{ background: "var(--bg-card)" }} onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm font-semibold text-text-primary">
-              Export {exportAsk.scope === "workspace" ? "workspace" : "collection"} \u201c{exportAsk.name}\u201d
-            </p>
-            <p className="mt-2 text-xs leading-relaxed text-text-muted">
-              Tokens and environment values make the file work as-is on another machine, and unsafe
-              to commit or share.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setExportAsk(null)}
-                      className="rounded px-2 py-1 text-xs text-text-muted transition hover:text-text-primary">
+            <div className="px-5 pb-4 pt-5">
+              <p className="text-[15px] font-semibold text-text-primary">
+                Export {exportAsk.scope === "workspace" ? "workspace" : "collection"} “{exportAsk.name}”
+              </p>
+              <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
+                Tokens and environment values make the file work as-is on another machine, and unsafe
+                to commit or share.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-subtle px-4 py-3">
+              <button onClick={() => setExportAsk(null)} className={secondaryBtn}>
                 Cancel
               </button>
-              <button onClick={() => void writeExport(false)}
-                      className="rounded border border-strong px-3 py-1 text-xs text-text-primary transition hover:bg-elev">
+              <button onClick={() => void writeExport(false)} className={secondaryBtn}>
                 Without secrets
               </button>
-              <button onClick={() => void writeExport(true)}
-                      className="rounded px-3 py-1 text-xs font-semibold text-white transition"
-                      style={{ background: "var(--accent)" }}>
+              <button onClick={() => void writeExport(true)} className={primaryBtn}>
                 With secrets
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {toast && (
-        <div className="pointer-events-none absolute bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-md border border-strong px-3 py-1.5 text-xs text-text-primary shadow-lg"
-             style={{ background: "var(--bg-card)" }}>
-          {toast}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -1097,7 +1144,11 @@ function WorkspaceBar({
   onImport: () => void;
   onMenu: (x: number, y: number, items: MenuEntry[]) => void;
 }) {
-  const [renaming, setRenaming] = useState(false);
+  const [ask, setAsk] = useState<NamePromptState | null>(null);
+  const rename = (w: Workspace) => setAsk({
+    title: "Rename workspace", initial: w.name, confirmLabel: "Rename",
+    onSave: (name) => onRename(w.id, name),
+  });
 
   return (
     <>
@@ -1112,7 +1163,7 @@ function WorkspaceBar({
             })),
             "sep" as const,
             { label: "New workspace", icon: Plus, onClick: onAdd },
-            ...(active ? [{ label: "Rename workspace", icon: Pencil, onClick: () => setRenaming(true) }] : []),
+            ...(active ? [{ label: "Rename workspace", icon: Pencil, onClick: () => rename(active) }] : []),
             ...(active ? [{ label: "Export workspace…", icon: Download, onClick: onExport }] : []),
             { label: "Import workspace…", icon: Upload, onClick: onImport },
             // The last workspace cannot go: with none left there is nowhere to put a request.
@@ -1121,26 +1172,18 @@ function WorkspaceBar({
               : []),
           ]);
         }}
-        className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 text-xs text-text-primary transition hover:bg-elev"
+        className="flex h-7 min-w-0 items-center gap-1 rounded-lg px-2 text-[12px] text-text-primary transition-colors hover:bg-white/5"
         title="Switch workspace"
       >
         <span className="max-w-[110px] truncate font-medium">{active?.name ?? "No workspace"}</span>
         <ChevronDown size={12} className="shrink-0 text-text-muted" />
       </button>
 
-      {renaming && active && (
-        <RenameDialog
-          title="Rename workspace"
-          value={active.name}
-          onCancel={() => setRenaming(false)}
-          onSave={(name) => { onRename(active.id, name); setRenaming(false); }}
-        />
-      )}
+      <NamePrompt state={ask} onClose={() => setAsk(null)} />
     </>
   );
 }
 
-/** Small modal for renaming a thing that has nowhere to host an inline input. */
 /**
  * What an import will add, shown before it happens.
  *
@@ -1181,54 +1224,14 @@ function ImportSummaryBody({ sum, target }: { sum: ImportSummary; target: string
   );
 }
 
-function RenameDialog({
-  title, value, onSave, onCancel,
-}: { title: string; value: string; onSave: (v: string) => void; onCancel: () => void }) {
-  const [text, setText] = useState(value);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
-  const commit = () => onSave(text.trim() || value);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
-      <div
-        className="w-[320px] max-w-[90vw] rounded-lg border border-strong p-3 shadow-2xl"
-        style={{ background: "var(--bg-card)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <p className="mb-2 text-xs font-semibold text-text-primary">{title}</p>
-        <input
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onFocus={(e) => e.target.select()}
-          onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
-          className="w-full rounded bg-elev px-2 py-1 text-sm text-text-primary outline-none ring-1 ring-[var(--accent)]"
-        />
-        <div className="mt-3 flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded px-2 py-1 text-xs text-text-muted transition hover:text-text-primary">
-            Cancel
-          </button>
-          <button onClick={commit} className="rounded px-3 py-1 text-xs font-semibold text-white transition"
-                  style={{ background: "var(--accent)" }}>
-            Rename
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ---- body -------------------------------------------------------------------
 
 const PLACEHOLDER_JSON = '{\n  "key": "value"\n}';
 
 const BODY_KINDS: BodyKind[] = ["none", "json", "text", "form"];
+
+/** What a kind is called on its button, where capitalising the id is not the word. */
+const KIND_LABEL: Record<string, string> = { json: "JSON", pre: "Pre-request", post: "Post-response" };
 
 /**
  * The pill row that picks a body kind or an auth kind.
@@ -1246,20 +1249,24 @@ function SegmentedTabs<T extends string>({
   /** Right of the pills, on the same row — a Beautify button, a parse error. */
   trailing?: React.ReactNode;
 }) {
+  // Deck's grouped-buttons look: one box on the elevated surface, the picked one in the accent.
   return (
-    <div className="flex h-8 shrink-0 items-center gap-1 border-b border-subtle px-2">
-      {options.map((k) => (
-        <button
-          key={k}
-          onClick={() => onChange(k)}
-          className={
-            "rounded px-2 py-0.5 text-[11px] capitalize transition " +
-            (value === k ? "bg-accent-soft text-accent" : "text-text-muted hover:bg-elev hover:text-text-primary")
-          }
-        >
-          {k}
-        </button>
-      ))}
+    <div className="flex h-9 shrink-0 items-center gap-1 px-2">
+      <div className="flex items-center gap-0.5 rounded-lg border border-subtle bg-elev p-0.5">
+        {options.map((k) => (
+          <button
+            key={k}
+            onClick={() => onChange(k)}
+            className={
+              "h-6 rounded-md px-2 text-[11.5px] transition-colors " +
+              (value === k ? "text-text-primary" : "text-text-muted hover:bg-white/5 hover:text-text-primary")
+            }
+            style={value === k ? { background: "var(--accent-soft)" } : undefined}
+          >
+            {KIND_LABEL[k] ?? k.charAt(0).toUpperCase() + k.slice(1)}
+          </button>
+        ))}
+      </div>
       {trailing}
     </div>
   );
@@ -1287,11 +1294,11 @@ function BodyEditor({
         onChange={(bodyKind) => patch({ bodyKind })}
         trailing={
           <>
-            {err && <span className="ml-2 truncate text-[10px] text-red-400" title={err}>{err}</span>}
+            {err && <span className="ml-2 truncate text-[11px] text-red-400" title={err}>{err}</span>}
             {req.bodyKind === "json" && (
               <button
                 onClick={beautify}
-                className="ml-auto shrink-0 rounded px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-elev hover:text-text-primary"
+                className={"ml-auto " + smallBtn}
               >
                 Beautify
               </button>
@@ -1299,7 +1306,7 @@ function BodyEditor({
           </>
         }
       />
-      {req.bodyKind === "none" && <Centered>No body sent with this request</Centered>}
+      {req.bodyKind === "none" && <Centered>This request sends no body. Pick JSON, Text or Form above to add one.</Centered>}
       {req.bodyKind === "form" && (
         <KeyValueGrid rows={req.formRows} onChange={(formRows) => patch({ formRows })} vars={vars}
           keyLabel="Field" valueLabel="Value" allowFiles />
@@ -1359,17 +1366,18 @@ function ScriptEditor({
         trailing={
           <>
             {(which === "pre" ? req.postScript : req.preScript)?.trim() && (
-              <span className="pl-1 text-[10px] text-text-muted" title="The other script has content">•</span>
+              <span className="pl-1" title="The other script has content"><Dot /></span>
             )}
-            <span className="ml-auto truncate pl-3 text-[11px] text-text-muted">
+            <span className="ml-auto truncate pl-3 text-[11.5px] text-text-muted">
               {which === "pre"
                 ? "Before sending — pm.environment.set(\"token\", …)"
                 : "On the response — pm.test(…), pm.response.json()"}
             </span>
+            {/* A toggle: lit, with the accent ring, while the reference is showing. */}
             <button
               onClick={() => setDocs((d) => !d)}
-              className={"ml-2 shrink-0 rounded px-2 py-0.5 text-[11px] transition " +
-                (docs ? "bg-accent-soft text-accent" : "text-text-muted hover:bg-elev hover:text-text-primary")}
+              className={"ml-2 " + (docs ? smallBtnOn : smallBtn)}
+              style={docs ? { background: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent)" } : undefined}
             >
               Docs
             </button>
@@ -1403,16 +1411,16 @@ function ScriptDocs({ which, onInsert }: { which: "pre" | "post"; onInsert: (cod
   const groups = PM_REFERENCE.filter((g) => g.scope === "both" || g.scope === which);
   return (
     <div className="scroll-thin w-80 shrink-0 overflow-auto border-l border-subtle p-3">
-      <p className="mb-3 text-[11px] leading-relaxed text-text-muted">{SANDBOX_NOTE}</p>
+      <p className="mb-3 text-[11.5px] leading-relaxed text-text-muted">{SANDBOX_NOTE}</p>
 
-      <div className="mb-1.5 text-[10px] uppercase tracking-wider text-text-muted">Examples</div>
+      <div className="mb-1.5 text-[12px] font-medium text-text-secondary">Examples</div>
       <div className="mb-4 flex flex-wrap gap-1">
         {snippets.map((sn) => (
           <button
             key={sn.label}
             onClick={() => onInsert(sn.code)}
             title={sn.code}
-            className="rounded border border-subtle px-2 py-0.5 text-[11px] text-text-secondary transition hover:border-strong hover:text-text-primary"
+            className="h-6 rounded-md border border-subtle bg-elev px-2 text-[11.5px] text-text-secondary transition-colors hover:border-strong hover:text-text-primary"
           >
             {sn.label}
           </button>
@@ -1421,10 +1429,10 @@ function ScriptDocs({ which, onInsert }: { which: "pre" | "post"; onInsert: (cod
 
       {groups.map((g) => (
         <div key={g.title} className="mb-4 last:mb-0">
-          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-text-muted">{g.title}</div>
+          <div className="mb-1.5 text-[12px] font-medium text-text-secondary">{g.title}</div>
           {g.entries.map((e) => (
             <div key={e.sig} className="mb-2 last:mb-0">
-              <code className="block break-all font-mono text-[11px] text-accent">{e.sig}</code>
+              <code className="block break-all font-mono text-[11px] text-text-primary">{e.sig}</code>
               <div className="text-[11px] leading-snug text-text-muted">{e.what}</div>
             </div>
           ))}
@@ -1450,7 +1458,7 @@ function AuthEditor({
         })}
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {a.kind === "none" && <p className="text-xs text-text-muted">No authorization header is added.</p>}
+        {a.kind === "none" && <p className="text-[12px] text-text-muted">No authorization header is added. Pick Bearer or Basic above to send one.</p>}
         {a.kind === "bearer" && (
           <AuthField label="Token" value={a.token} onChange={(token) => patch({ auth: { ...a, token } })} vars={vars}
             hint="Use {{name}} to pull the token from the environment instead of typing it here." />
@@ -1471,11 +1479,11 @@ function AuthField({
 }: { label: string; value: string; onChange: (v: string) => void; vars: Record<string, string>; hint?: string }) {
   return (
     <div className="max-w-md">
-      <span className="mb-1 block text-[11px] text-text-secondary">{label}</span>
-      <div className="flex h-8 items-center rounded border border-strong bg-elev px-2">
+      <span className="mb-1 block text-[12px] font-medium text-text-secondary">{label}</span>
+      <div className="flex h-8 items-center rounded-lg border border-subtle bg-elev px-2.5 transition-colors focus-within:border-[var(--accent)]">
         <VarInput value={value} onChange={onChange} vars={vars} className="font-mono text-xs text-text-primary" />
       </div>
-      {hint && <span className="mt-1 block text-[10px] italic text-text-muted">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-text-muted">{hint}</span>}
     </div>
   );
 }
@@ -1498,21 +1506,25 @@ function AuthField({
  * the URL bar's selector.
  */
 function EnvDialog({
-  col, envId, update, onClose,
+  col, envId, update, onClose, confirm, asking,
 }: {
   col: Collections;
   envId: string;
   update: (p: (c: Collections) => Collections) => void;
   onClose: () => void;
+  /** Ask before deleting, in the screen's one ConfirmDialog. */
+  confirm: (s: ConfirmState) => void;
+  /** That dialog is open over this one: its Escape is its own, not a reason to close this. */
+  asking: boolean;
 }) {
   const env = col.environments.find((e) => e.id === envId) ?? null;
   const activeEnvId = col.workspaces.find((w) => w.id === col.activeWorkspaceId)?.activeEnvId ?? null;
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !asking) onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, asking]);
 
   // Deleted from under us (another window, or the workspace switched) — nothing to show.
   if (!env) return null;
@@ -1520,29 +1532,31 @@ function EnvDialog({
   const patch = (p: Partial<Environment>) =>
     update((c) => ({ ...c, environments: c.environments.map((x) => (x.id === env.id ? { ...x, ...p } : x)) }));
 
-  return (
+  // Portalled, like Deck's own dialogs: a transformed ancestor would otherwise clip `fixed`.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
       onClick={onClose}
     >
       <div
-        className="flex h-[70vh] w-[560px] max-w-[90vw] flex-col overflow-hidden rounded-lg border border-strong shadow-2xl"
+        className="flex h-[70vh] w-[560px] max-w-[90vw] flex-col overflow-hidden rounded-[12px] border border-subtle shadow-2xl"
         style={{ background: "var(--bg-card)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-subtle px-3">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-subtle px-3">
           <Globe size={14} className="shrink-0 text-text-muted" />
           <input
             value={env.name}
             onChange={(e) => patch({ name: e.target.value })}
             onFocus={(e) => e.target.select()}
             title="Environment name — click to rename"
-            className="min-w-0 flex-1 rounded bg-transparent px-1.5 py-0.5 text-sm font-medium text-text-primary outline-none transition hover:bg-elev focus:bg-elev focus:ring-1 focus:ring-[var(--accent)]"
+            className="h-8 min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 text-[13px] font-medium text-text-primary outline-none transition-colors hover:border-subtle focus:border-[var(--accent)] focus:bg-elev"
           />
           {activeEnvId === env.id ? (
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-accent"
+            <span className="shrink-0 rounded-full px-1.5 py-px text-[10.5px]"
+                  style={{ color: ACTIVE_TONE, background: `color-mix(in srgb, ${ACTIVE_TONE} 14%, transparent)` }}
                   title="Active — {{name}} resolves against this environment">
-              active
+              Active
             </span>
           ) : (
             <button
@@ -1550,28 +1564,34 @@ function EnvDialog({
                 ...c,
                 workspaces: c.workspaces.map((w) => (w.id === c.activeWorkspaceId ? { ...w, activeEnvId: env.id } : w)),
               }))}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-text-muted transition hover:bg-elev hover:text-accent"
+              title="Make this the environment {{name}} resolves against"
+              className="flex h-7 shrink-0 items-center rounded-lg border border-subtle bg-elev px-2.5 text-[11.5px] text-text-secondary transition-colors hover:border-strong hover:text-text-primary"
             >
               Use
             </button>
           )}
           <button
-            onClick={() => {
-              update((c) => ({
-                ...c,
-                environments: c.environments.filter((x) => x.id !== env.id),
-                // An environment that no longer exists cannot stay active, or {{vars}} resolve to
-                // nothing with no sign of why.
-                workspaces: c.workspaces.map((w) => (w.activeEnvId === env.id ? { ...w, activeEnvId: null } : w)),
-              }));
-              onClose();
-            }}
+            onClick={() => confirm({
+              title: `Delete the environment ${env.name}?`,
+              body: `This also deletes its ${env.vars.length} variable${env.vars.length === 1 ? "" : "s"}; requests that use them stay, with those {{names}} left unresolved.`,
+              confirmLabel: "Delete",
+              onConfirm: () => {
+                update((c) => ({
+                  ...c,
+                  environments: c.environments.filter((x) => x.id !== env.id),
+                  // An environment that no longer exists cannot stay active, or {{vars}} resolve to
+                  // nothing with no sign of why.
+                  workspaces: c.workspaces.map((w) => (w.activeEnvId === env.id ? { ...w, activeEnvId: null } : w)),
+                }));
+                onClose();
+              },
+            })}
             title="Delete environment"
-            className="shrink-0 rounded p-1 text-text-muted transition hover:text-red-400"
+            className={toolDangerBtn}
           >
-            <Trash2 size={13} />
+            <Trash2 size={14} />
           </button>
-          <button onClick={onClose} title="Close" className="shrink-0 rounded p-1 text-text-muted transition hover:text-text-primary">
+          <button onClick={onClose} title="Close" className={toolBtn}>
             <X size={14} />
           </button>
         </div>
@@ -1588,29 +1608,42 @@ function EnvDialog({
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
 // ---- bits -------------------------------------------------------------------
 
+// Deck's button and icon-button shapes (docs/design.md), named once for the screens above.
+/** The one accent-filled action on a screen. */
+const primaryBtn = "flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium text-white transition hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 bg-[var(--accent)]";
+/** Every other button beside it. */
+const secondaryBtn = "flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-subtle bg-elev px-3 text-[12.5px] text-text-secondary transition-colors hover:border-strong hover:text-text-primary";
+/** A small text button in a panel's toolbar row (Beautify, Docs). */
+const smallBtn = "flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[11.5px] text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";
+const smallBtnOn = "flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[11.5px] text-text-primary transition-colors";
+/** A toolbar icon button. */
+const toolBtn = "grid size-7 shrink-0 place-items-center rounded-lg text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";
+/** The same, for something that destroys: red only under the pointer. */
+const toolDangerBtn = "grid size-7 shrink-0 place-items-center rounded-lg text-text-muted transition-colors hover:bg-white/5 hover:text-red-400";
+/** The "this one is in use" chip colour. */
+const ACTIVE_TONE = "rgb(var(--tone-green-400))";
+
 const Centered = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex h-full items-center justify-center text-xs text-text-muted">{children}</div>
+  <div className="flex h-full items-center justify-center px-6 text-center text-[12px] text-text-muted">{children}</div>
 );
-const Dot = () => <span className="inline-block h-1 w-1 rounded-full bg-accent" />;
+const Dot = () => <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />;
 
 const SectionLabel = ({ children }: { children: React.ReactNode }) => (
-  <div className="border-b border-subtle px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-text-muted"
-       style={{ background: "var(--bg-panel)" }}>
+  <div className="px-3 pb-1 pt-2 text-[12px] font-medium text-text-secondary">
     {children}
   </div>
 );
 
-const Badge = ({ on, children }: { on: boolean; children: React.ReactNode }) => (
-  <span
-    className={"inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-semibold leading-none " +
-      (on ? "bg-accent-soft text-accent" : "bg-elev text-text-muted")}
-  >
+/** A count after a tab's name, as Deck's count chips are drawn. */
+const Badge = ({ children }: { children: React.ReactNode }) => (
+  <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-elev px-1.5 text-[10.5px] text-text-secondary">
     {children}
   </span>
 );

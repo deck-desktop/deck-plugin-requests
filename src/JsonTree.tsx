@@ -11,8 +11,8 @@ export default function JsonTree({ body }: { body: string }) {
     parsed = JSON.parse(body);
   } catch {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-red-400 opacity-70">
-        Invalid JSON — cannot preview
+      <div className="flex h-full items-center justify-center px-6 text-center text-[12px] text-text-muted">
+        This body is not valid JSON, so there is no tree to show. Switch to Source to read it.
       </div>
     );
   }

@@ -21,11 +21,21 @@ import CodeBox from "./CodeBox";
  * opens an LSP document, tracks dirty state, and caches the model by URI). A response is
  * ephemeral and has no path, so it gets a plain throwaway model instead.
  */
-function statusTone(status: number): string {
-  if (status >= 500) return "text-red-400";
-  if (status >= 400) return "text-amber-400";
-  if (status >= 300) return "text-blue-400";
-  return "text-green-400";
+function statusColor(status: number): string {
+  if (status >= 500) return "rgb(var(--tone-red-400))";
+  if (status >= 400) return "rgb(var(--tone-amber-400))";
+  if (status >= 300) return "rgb(var(--tone-blue-400))";
+  return "rgb(var(--tone-green-400))";
+}
+
+/** A state said in its colour: the text in it, the background the same at 14%. */
+function ToneChip({ color, title, children }: { color: string; title?: string; children: React.ReactNode }) {
+  return (
+    <span title={title} className="shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-medium"
+      style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>
+      {children}
+    </span>
+  );
 }
 
 type Tab = "body" | "headers" | "cookies" | "tests";
@@ -78,9 +88,14 @@ export default function ResponseView({
 
   if (error) {
     return (
-      <div className="h-full overflow-auto p-4">
-        <div className="mb-2 text-sm font-medium text-red-400">Request failed</div>
-        <pre className="whitespace-pre-wrap break-all text-xs text-text-secondary">{error}</pre>
+      <div className="scroll-thin h-full overflow-auto p-3">
+        <div className="flex items-start gap-2.5 rounded-lg border border-subtle bg-elev px-3 py-3">
+          <XCircle size={16} className="mt-0.5 shrink-0 text-red-400" />
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-medium text-text-primary">Request failed</div>
+            <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[11.5px] text-text-secondary">{error}</pre>
+          </div>
+        </div>
       </div>
     );
   }
@@ -120,7 +135,7 @@ export default function ResponseView({
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => { if (collapsed) onToggleCollapse(); setTab(t); }}
             className={
-              "px-3 py-2 text-xs capitalize transition " +
+              "flex items-center gap-1.5 px-3 py-2 text-xs capitalize transition " +
               (t === tab && !collapsed
                 ? "border-b-2 border-accent text-text-primary"
                 : "border-b-2 border-transparent text-text-muted hover:text-text-secondary")
@@ -130,29 +145,29 @@ export default function ResponseView({
             {t === "headers" && <Count n={result.headers.length} />}
             {t === "cookies" && cookies.length > 0 && <Count n={cookies.length} />}
             {t === "tests" && (
-              <span className={"ml-1.5 text-[10px] " + (runFailed(scripts) ? "text-red-400" : "text-green-400")}>
+              <ToneChip color={runFailed(scripts) ? "rgb(var(--tone-red-400))" : "rgb(var(--tone-green-400))"}>
                 {tests.filter((x) => x.passed).length}/{tests.length || "!"}
-              </span>
+              </ToneChip>
             )}
           </button>
         ))}
 
-        <div className="ml-auto flex items-center gap-2.5 pl-4 text-xs">
-          <span className={`font-semibold ${statusTone(result.status)}`}>
+        <div className="ml-auto flex items-center gap-1.5 pl-4 text-xs">
+          <ToneChip color={statusColor(result.status)}>
             {result.status} {result.status_text}
-          </span>
+          </ToneChip>
           <Sep />
-          <span className="font-mono text-text-muted">{result.elapsed_ms} ms</span>
+          <span className="font-mono text-[11px] text-text-muted">{result.elapsed_ms} ms</span>
           <Sep />
-          <span className="font-mono text-text-muted">{formatSize(result.size)}</span>
+          <span className="font-mono text-[11px] text-text-muted">{formatSize(result.size)}</span>
           {result.truncated && (
-            <span className="text-amber-400" title="Only the first 10 MB was downloaded">truncated</span>
+            <ToneChip color="rgb(var(--tone-amber-400))" title="Only the first 10 MB was downloaded">Truncated</ToneChip>
           )}
           <button
             onMouseDown={(e) => e.stopPropagation()}
             onClick={onToggleCollapse}
             title={collapsed ? "Expand response" : "Collapse response"}
-            className="rounded p-1 text-text-muted transition hover:bg-elev hover:text-text-primary"
+            className={"ml-1 " + iconBtn}
           >
             {collapsed ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
@@ -160,8 +175,8 @@ export default function ResponseView({
       </div>
 
       {!collapsed && tab === "body" && (result.body || result.body_b64) && (
-        <div className="flex shrink-0 items-center gap-1 border-b border-subtle px-2 py-1">
-          <span className="rounded bg-elev px-2 py-0.5 font-mono text-[10px] uppercase text-text-secondary">
+        <div className="flex h-9 shrink-0 items-center gap-1 px-2">
+          <span className="mr-1 rounded-full bg-elev px-1.5 py-px font-mono text-[10.5px] text-text-secondary">
             {lang === "plaintext" ? "raw" : lang}
           </span>
           {lang === "json" && !preview && !media && (
@@ -175,11 +190,11 @@ export default function ResponseView({
             </Chip>
           )}
           <span className="ml-auto flex items-center gap-1">
-            {saved && <span className="truncate text-[10px] text-green-400" title={saved}>Saved</span>}
+            {saved && <span className="truncate text-[11px] text-green-400" title={saved}>Saved</span>}
             <button
               onClick={() => void download()}
               title="Save the response to a file"
-              className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-elev hover:text-text-primary"
+              className={smallBtn}
             >
               <Download size={11} /> Save
             </button>
@@ -187,7 +202,8 @@ export default function ResponseView({
             {!result.body_b64 && (
               <button
                 onClick={() => void navigator.clipboard.writeText(shown)}
-                className="rounded px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-elev hover:text-text-primary"
+                title="Copy the response body"
+                className={smallBtn}
               >
                 Copy
               </button>
@@ -200,7 +216,7 @@ export default function ResponseView({
         <div className="min-h-0 flex-1">
           {tab === "body" ? (
             !result.body && !result.body_b64 ? (
-              <Centered>Empty body</Centered>
+              <Centered>The response has an empty body. Its status and headers are above.</Centered>
             ) : media ? (
               // The bytes as a data: URI. The code box would show a page of replacement
               // characters — from_utf8_lossy has already destroyed them — so media never gets
@@ -221,11 +237,11 @@ export default function ResponseView({
           ) : tab === "headers" ? (
             <KeyTable rows={result.headers} />
           ) : cookies.length === 0 ? (
-            <Centered>No cookies set</Centered>
+            <Centered>This response sets no cookies.</Centered>
           ) : (
             <div className="scroll-thin h-full overflow-auto">
               <table className="w-full text-xs">
-                <thead className="text-[10px] uppercase tracking-wider text-text-muted">
+                <thead className="text-[11.5px] text-text-muted">
                   <tr className="border-b border-subtle">
                     <Th>Name</Th><Th>Value</Th><Th>Domain</Th><Th>Path</Th><Th>Flags</Th>
                   </tr>
@@ -281,16 +297,18 @@ function TestsPanel({ run, noEnvironment }: { run?: ScriptRun; noEnvironment?: b
   return (
     <div className="scroll-thin h-full overflow-auto p-3 text-xs">
       {noEnvironment && setAny && (
-        <div className="mb-3 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-amber-300">
+        <div className="mb-3 rounded-lg px-2.5 py-1.5 text-amber-300"
+          style={{ background: "color-mix(in srgb, rgb(var(--tone-amber-400)) 14%, transparent)" }}>
           No active environment — variables the script set were not saved.
         </div>
       )}
       {halves.map(([label, r]) => (
         <div key={label} className="mb-4 last:mb-0">
-          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-text-muted">{label}</div>
+          <div className="mb-1.5 text-[12px] font-medium text-text-secondary">{label}</div>
 
           {r.error && (
-            <pre className="mb-2 whitespace-pre-wrap break-all rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-red-300">
+            <pre className="mb-2 whitespace-pre-wrap break-all rounded-lg px-2.5 py-1.5 font-mono text-[11.5px] text-red-300"
+              style={{ background: "color-mix(in srgb, rgb(var(--tone-red-400)) 14%, transparent)" }}>
               {r.error}
             </pre>
           )}
@@ -320,7 +338,8 @@ function TestsPanel({ run, noEnvironment }: { run?: ScriptRun; noEnvironment?: b
           )}
 
           {r.logs.length > 0 && (
-            <pre className="mt-2 whitespace-pre-wrap break-all rounded bg-elev px-2 py-1.5 font-mono text-[11px] text-text-secondary">
+            <pre className="mt-2 whitespace-pre-wrap break-all rounded-lg border border-subtle px-2.5 py-1.5 font-mono text-[11px] text-text-secondary"
+              style={{ background: "var(--bg-app)" }}>
               {r.logs.join("\n")}
             </pre>
           )}
@@ -362,13 +381,13 @@ function Sending({
       >
         <span className="px-3 py-2 text-xs text-text-muted">Response</span>
         <div className="ml-auto flex items-center gap-2.5 py-2 pl-4 text-xs">
-          <Loader2 size={12} className="animate-spin text-accent" />
+          <Loader2 size={13} className="animate-spin text-text-muted" />
           <span className="font-mono text-text-muted">{(ms / 1000).toFixed(1)}s</span>
           <Sep />
           <button
             onMouseDown={(e) => e.stopPropagation()}
             onClick={onCancel}
-            className="flex items-center gap-1 text-text-muted transition hover:text-red-400"
+            className="flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-text-muted transition-colors hover:bg-white/5 hover:text-red-400"
           >
             <XCircle size={12} />
             Cancel
@@ -377,7 +396,7 @@ function Sending({
             onMouseDown={(e) => e.stopPropagation()}
             onClick={onToggleCollapse}
             title={collapsed ? "Expand response" : "Collapse response"}
-            className="rounded p-1 text-text-muted transition hover:bg-elev hover:text-text-primary"
+            className={iconBtn}
           >
             {collapsed ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
@@ -413,11 +432,19 @@ function KeyTable({ rows }: { rows: [string, string][] }) {
 }
 
 const Centered = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex h-full items-center justify-center text-sm text-text-muted">{children}</div>
+  <div className="flex h-full items-center justify-center px-6 text-center text-[12px] text-text-muted">{children}</div>
 );
-const Count = ({ n }: { n: number }) => <span className="ml-1 text-text-muted">{n}</span>;
-const Sep = () => <span className="text-text-muted opacity-30">|</span>;
+/** A count after a tab's name, as Deck's count chips are drawn. */
+const Count = ({ n }: { n: number }) => (
+  <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-elev px-1.5 text-[10.5px] text-text-secondary">{n}</span>
+);
+// An <i>, so a style on the parent's spans never reaches it.
+const Sep = () => <i aria-hidden className="mx-1 h-3.5 w-px bg-white/10" />;
 const Th = ({ children }: { children: React.ReactNode }) => <th className="px-3 py-1.5 text-left font-medium">{children}</th>;
+/** A small text button in the body's toolbar row. */
+const smallBtn = "flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";
+/** An icon button in the header row. */
+const iconBtn = "grid size-6 place-items-center rounded-md text-text-muted transition-colors hover:bg-white/5 hover:text-text-primary";
 const Td = ({ children, mono, truncate }: { children: React.ReactNode; mono?: boolean; truncate?: boolean }) => (
   <td className={"px-3 py-1.5 text-text-muted " + (mono ? "font-mono " : "") + (truncate ? "max-w-[16rem] truncate" : "")}>{children}</td>
 );
@@ -429,9 +456,11 @@ function Chip({
     <button
       onClick={onClick}
       className={
-        "flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition " +
-        (on ? "bg-accent-soft text-accent" : "text-text-muted hover:bg-elev hover:text-text-primary")
+        "flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] transition-colors " +
+        (on ? "text-text-primary" : "text-text-muted hover:bg-white/5 hover:text-text-primary")
       }
+      // A toggle that is on: the accent wash and its ring.
+      style={on ? { background: "var(--accent-soft)", boxShadow: "inset 0 0 0 1px var(--accent)" } : undefined}
     >
       {icon}
       {children}

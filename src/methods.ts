@@ -9,10 +9,12 @@ export const METHOD_TONE: Record<Method, string> = {
   PATCH: "text-violet-400", DELETE: "text-red-400", HEAD: "text-pink-400", OPTIONS: "text-cyan-400",
 };
 
-// Hex alongside the class, because the picker's dot and its glow are inline styles.
+// The same colours as CSS values alongside the class, because the picker's dot and its glow are
+// inline styles. Deck's tone channels, so a light theme darkens them along with the classes.
 export const METHOD_HEX: Record<Method, string> = {
-  GET: "#34d399", POST: "#fbbf24", PUT: "#60a5fa",
-  PATCH: "#a78bfa", DELETE: "#f87171", HEAD: "#f472b6", OPTIONS: "#22d3ee",
+  GET: "rgb(var(--tone-emerald-400))", POST: "rgb(var(--tone-amber-400))", PUT: "rgb(var(--tone-blue-400))",
+  PATCH: "rgb(var(--tone-violet-400))", DELETE: "rgb(var(--tone-red-400))", HEAD: "rgb(var(--tone-pink-400))",
+  OPTIONS: "rgb(var(--tone-cyan-400))",
 };
 
 export const METHOD_DESC: Record<Method, string> = {

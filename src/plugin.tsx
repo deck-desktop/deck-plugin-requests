@@ -4,8 +4,8 @@
 // through the bridge; everything else, the collections, environments, scripts and history, is
 // the plugin's. Saved data moved with it: Deck renames the http-* config files to requests-* at
 // startup, so a collection made in the old tab is here unchanged.
-import { Settings as SettingsIcon } from "lucide-react";
 import { useSettings, saveSettings } from "../shim/settings.js";
+import { Row } from "../shim/ui.js";
 import Requests from "./Requests";
 import { stopHttpSend } from "./httpsend";
 import { releaseWorker } from "./httpscript";
@@ -21,19 +21,16 @@ export const keybindings = () => [
 /** Whether the MCP tools return secrets in full. A Deck setting, because the MCP server reads it. */
 export function Settings() {
   const s = useSettings();
+  // Deck's own settings row and switch, so this reads as part of the Settings screen around it.
   return (
-    <label className="flex items-start gap-3 text-sm">
-      <input type="checkbox" className="mt-1" checked={s.httpMcpRevealSecrets}
-        onChange={(e) => void saveSettings({ ...s, httpMcpRevealSecrets: e.target.checked })} />
-      <span>
-        <span className="flex items-center gap-1.5 font-medium text-text-primary"><SettingsIcon size={13} /> Reveal secrets to MCP</span>
-        <span className="block text-xs text-text-muted">
-          Off: environment values and auth credentials come back masked, so tokens stay out of an
-          agent's transcript and its logs. On: they are returned in full. The agent can always
-          write them either way.
-        </span>
-      </span>
-    </label>
+    <Row
+      title="Reveal secrets to MCP"
+      desc={"Off: environment values and auth credentials come back masked, so tokens stay out of an "
+        + "agent's transcript and its logs. On: they are returned in full. The agent can always "
+        + "write them either way."}
+      on={s.httpMcpRevealSecrets}
+      onChange={(on) => void saveSettings({ ...s, httpMcpRevealSecrets: on })}
+    />
   );
 }
 
