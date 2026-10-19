@@ -16,6 +16,7 @@ export const PaneView = () => <Requests />;
 export const keybindings = () => [
   { id: "send", title: "Send the request", defaultChord: "ctrl+enter" },
   { id: "save", title: "Save the request", defaultChord: "ctrl+s" },
+  { id: "rename", title: "Rename a request or folder", defaultChord: "f2" },
 ];
 
 /** Whether the MCP tools return secrets in full. A Deck setting, because the MCP server reads it. */

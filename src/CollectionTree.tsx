@@ -10,7 +10,11 @@ import { useState } from "react";
 import { ChevronRight, Plus, Trash2, Copy, FolderPlus, Pencil, FileUp, Download, TerminalSquare, Folder as FolderIcon } from "lucide-react";
 import type { Collections, Folder, Request } from "./httpclient";
 import { METHOD_TONE } from "./methods";
-import { TreeRow, useRowDrag, type DropTarget, type MenuEntry } from "../shim/ui.js";
+import { chordFor, formatChord, parseChord, TreeRow, useRowDrag, type DropTarget, type MenuEntry } from "../shim/ui.js";
+
+/** Rename's key on a row, which follows Settings > Keybindings (plugin.tsx declares it). */
+const isRename = (e: React.KeyboardEvent) => parseChord(e.nativeEvent) === chordFor("plugin:requests:rename");
+const renameHint = () => formatChord(chordFor("plugin:requests:rename"));
 
 // Dragging is pointer-based (components/dragrow.ts), not HTML5. HTML5 DnD is dead in this
 // window: dragDropEnabled in tauri.conf makes wry take over the webview's OLE drop target, and
@@ -142,7 +146,7 @@ function FolderNode({
     { label: "New request", icon: Plus, onClick: () => cb.onAddRequest(folder.id) },
     { label: "New folder", icon: FolderPlus, onClick: () => cb.onAddFolder(folder.id) },
     "sep",
-    { label: "Rename", icon: Pencil, hint: "F2", onClick: () => setRenaming(true) },
+    { label: "Rename", icon: Pencil, hint: renameHint(), onClick: () => setRenaming(true) },
     ...(isCollection ? [] : [{ label: "Move to top level", icon: FileUp, onClick: () => cb.onMoveToRoot(folder.id) }]),
     ...(isCollection ? [{ label: "Export…", icon: Download, onClick: () => cb.onExportCollection(folder.id) }] : []),
     "sep",
@@ -198,10 +202,10 @@ function FolderNode({
           if (n.has(folder.id)) n.delete(folder.id); else n.add(folder.id);
           return n;
         })}
-        // Rename is the context menu (and F2, which that menu advertises). Not double-click: a
+        // Rename is the context menu (and its key, F2 by default, which that menu advertises). Not double-click: a
         // folder row's double-click is two collapses in a row, and turning that into a rename
         // put the tree into edit mode by accident.
-        onKeyDown={(e) => { if (e.key === "F2") { e.preventDefault(); setRenaming(true); } }}
+        onKeyDown={(e) => { if (isRename(e)) { e.preventDefault(); setRenaming(true); } }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); menu(e.clientX, e.clientY); }}
         leading={
           <>
@@ -269,11 +273,11 @@ function RequestNode({
       dragParentId={parentId}
       onMouseDown={startDrag(req.id)}
       onClick={() => cb.onOpen(req)}
-      onKeyDown={(e) => { if (e.key === "F2") { e.preventDefault(); setRenaming(true); } }}
+      onKeyDown={(e) => { if (isRename(e)) { e.preventDefault(); setRenaming(true); } }}
       onContextMenu={(e) => {
         e.preventDefault(); e.stopPropagation();
         cb.onMenu(e.clientX, e.clientY, [
-          { label: "Rename", icon: Pencil, hint: "F2", onClick: () => setRenaming(true) },
+          { label: "Rename", icon: Pencil, hint: renameHint(), onClick: () => setRenaming(true) },
           { label: "Duplicate", icon: Copy, onClick: () => cb.onDuplicateRequest(req.id) },
           { label: "Copy as cURL", subLabel: "{{variables}} left as-is", icon: TerminalSquare,
             onClick: () => cb.onCopyCurl(req.id, false) },
