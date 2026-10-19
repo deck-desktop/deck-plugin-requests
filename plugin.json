@@ -4,6 +4,6 @@
   "description": "Build, send and save HTTP requests in a pane: collections, environments and {{variables}}, pre- and post-request scripts, cURL import and export, history. Formerly Deck's HTTP tab; saved collections carry over.",
   "icon": "Send",
   "color": "#22d3ee",
-  "version": "1.1.0",
-  "minDeck": "1.6.0"
+  "version": "1.1.1",
+  "minDeck": "1.7.0"
 }
