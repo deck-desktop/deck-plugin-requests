@@ -180,7 +180,7 @@ export default function VarInput({
         // Paste as plain text — otherwise copying a URL from a styled page drags its markup in.
         onPaste={(e) => {
           e.preventDefault();
-          document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+          e.currentTarget.ownerDocument.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
         }}
         data-placeholder={placeholder}
         className={
@@ -233,11 +233,13 @@ const POP = "scroll-thin absolute left-0 top-full z-50 mt-1 max-h-56 w-80 animat
 const ITEM = "flex w-full items-baseline gap-2 rounded-[6px] px-2.5 py-1 text-left text-[12px] ";
 
 // ---- caret helpers ----------------------------------------------------------
+// Read and set through the field's own document: in a floating window the main page's selection
+// is not the one the field is in, and the caret went back to the start after every key.
 // Offsets are counted in plain-text characters across all child nodes, so they survive the
 // innerHTML rebuild that turns typed text into token spans.
 
 function getCaret(el: HTMLElement): number {
-  const s = window.getSelection();
+  const s = el.ownerDocument.getSelection();
   if (!s || s.rangeCount === 0) return 0;
   const r = s.getRangeAt(0).cloneRange();
   r.selectNodeContents(el);
@@ -246,9 +248,9 @@ function getCaret(el: HTMLElement): number {
 }
 
 function setCaret(el: HTMLElement, offset: number) {
-  const s = window.getSelection();
+  const s = el.ownerDocument.getSelection();
   if (!s) return;
-  const r = document.createRange();
+  const r = el.ownerDocument.createRange();
   let remaining = offset;
   let placed = false;
 
