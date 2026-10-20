@@ -23,9 +23,11 @@ export default function MethodPicker({
       if (!wrap.current?.contains(t) && !pop.current?.contains(t)) setAt(null);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setAt(null); };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onEsc);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onEsc); };
+    // The document the picker is in: Deck's main window's, or a floating window's.
+    const doc = wrap.current?.ownerDocument ?? document;
+    doc.addEventListener("mousedown", onDoc);
+    doc.addEventListener("keydown", onEsc);
+    return () => { doc.removeEventListener("mousedown", onDoc); doc.removeEventListener("keydown", onEsc); };
   }, [open]);
 
   return (

@@ -119,13 +119,16 @@ export default function Requests() {
   const dragSidebar = (e: React.PointerEvent) => {
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    // The window the tab is in: Deck's main one, or a floating window, whose moves the main one
+    // never hears.
+    const win = e.currentTarget.ownerDocument.defaultView ?? window;
     const move = (ev: PointerEvent) => {
       const left = asideRef.current?.getBoundingClientRect().left ?? 0;
       setSidebarW(Math.min(560, Math.max(160, ev.clientX - left)));
     };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    const up = () => { win.removeEventListener("pointermove", move); win.removeEventListener("pointerup", up); };
+    win.addEventListener("pointermove", move);
+    win.addEventListener("pointerup", up);
   };
 
   // Persist the session whenever any part of it changes. Cheap enough to do eagerly: the payload
@@ -439,7 +442,7 @@ export default function Requests() {
     }
     // After the expansion has rendered, otherwise the row does not exist to scroll to yet.
     requestAnimationFrame(() => {
-      document.querySelector(`[${ROW_ATTR}="${requestId}"]`)?.scrollIntoView({ block: "nearest" });
+      asideRef.current?.querySelector(`[${ROW_ATTR}="${requestId}"]`)?.scrollIntoView({ block: "nearest" });
     });
   };
 
@@ -1520,11 +1523,14 @@ function EnvDialog({
   const env = col.environments.find((e) => e.id === envId) ?? null;
   const activeEnvId = col.workspaces.find((w) => w.id === col.activeWorkspaceId)?.activeEnvId ?? null;
 
+  // Escape heard in the window the dialog is in: Deck's main one, or a floating window.
+  const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const win = boxRef.current?.ownerDocument.defaultView ?? window;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !asking) onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, asking]);
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
+  }, [onClose, asking, !!env]);
 
   // Deleted from under us (another window, or the workspace switched) — nothing to show.
   if (!env) return null;
@@ -1534,7 +1540,7 @@ function EnvDialog({
 
   // Portalled, like Deck's own dialogs: a transformed ancestor would otherwise clip `fixed`.
   return createPortal(
-    <div
+    <div ref={boxRef}
       className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
       onClick={onClose}
     >
