@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "../shim/react-dom.js";
 import { onKeys, useScope } from "../shim/ui.js";
+import { notice, failure } from "./notice";
 import {
   Plus, Trash2, FolderPlus, Loader2, Search, Globe, X, Upload, TerminalSquare, Download,
   FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft, Send,
@@ -22,7 +23,7 @@ import {
   type HistoryEntry,
 } from "./httpclient";
 import {
-  ContextMenu, useNarrow, useResize, ActivityBar, TabStrip, ConfirmDialog, NamePrompt, toast,
+  ContextMenu, useNarrow, useResize, ActivityBar, TabStrip, ConfirmDialog, NamePrompt,
   type MenuEntry, type ConfirmState, type NamePromptState,
 } from "../shim/ui.js";
 
@@ -92,7 +93,7 @@ export default function Requests() {
   const [respCollapsed, setRespCollapsed] = useState(false);
   const [editEnv, setEditEnv] = useState<string | null>(null); // environment open in the editor dialog
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
-  // The file operations report through Deck's toast — they are silent otherwise, and a failed
+  // The file operations report through Deck's notifications — they are silent otherwise, and a failed
   // import that says nothing looks like a broken button.
   const [exportAsk, setExportAsk] = useState<{ scope: "collection" | "workspace"; id: string; name: string } | null>(null);
   const [sidebarW, setSidebarW] = useState(saved0.sidebarW ?? 256); // px; the drag handle beside the sidebar resizes
@@ -452,8 +453,8 @@ export default function Requests() {
     const r = col?.requests[id];
     if (!r) return;
     navigator.clipboard.writeText(toCurl(r, resolved ? vars : undefined)).then(
-      () => toast(resolved ? "Copied with environment values filled in." : "Copied as cURL.", "success"),
-      () => toast("Could not copy to the clipboard.", "error"),
+      () => notice(resolved ? "Copied with environment values filled in." : "Copied as cURL."),
+      () => failure("Could not copy to the clipboard."),
     );
   };
 
@@ -461,7 +462,7 @@ export default function Requests() {
   const importCurl = async () => {
     const text = await navigator.clipboard.readText().catch(() => "");
     const req = text && parseCurl(text);
-    if (!req) { toast("Clipboard does not hold a curl command.", "error"); return; }
+    if (!req) { failure("Clipboard does not hold a curl command."); return; }
     openScratch(req);
   };
 
@@ -489,9 +490,9 @@ export default function Requests() {
         ? exportWorkspace(col, ask.id, { includeSecrets })
         : exportCollection(col, ask.id, { includeSecrets });
       await fsWrite(path, JSON.stringify(file, null, 2));
-      toast(includeSecrets ? "Exported with secrets." : "Exported without secrets.", "success");
+      notice(includeSecrets ? "Exported with secrets." : "Exported without secrets.");
     } catch (e) {
-      toast(`Export failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+      failure(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -523,11 +524,11 @@ export default function Requests() {
           });
           // Tabs belong to the workspace that was open, and this switches away from it.
           setTabs([]); setActiveId(null);
-          toast(`Imported "${file.name}" as a new workspace${file.secrets ? "" : " (no secrets in the file)"}.`, "success");
+          notice(`Imported "${file.name}" as a new workspace${file.secrets ? "" : " (no secrets in the file)"}.`);
         },
       });
     } catch (e) {
-      toast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+      failure(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -537,7 +538,7 @@ export default function Requests() {
       if (!path) return;
       const file = parseExport(await fsRead(path));
       const wsId = col?.activeWorkspaceId;
-      if (!wsId) { toast("No workspace to import into.", "error"); return; }
+      if (!wsId) { failure("No workspace to import into."); return; }
       const wsName = col.workspaces.find((w) => w.id === wsId)?.name;
       const sum = summarizeImport(col, file, wsId);
       setConfirm({
@@ -548,11 +549,11 @@ export default function Requests() {
         wide: true,
         onConfirm: () => {
           update((c) => importCollection(c, file, wsId, { withEnvironments: file.environments.length > 0 }));
-          toast(`Imported "${file.name}"${file.secrets ? "" : " (no secrets in the file)"}.`, "success");
+          notice(`Imported "${file.name}"${file.secrets ? "" : " (no secrets in the file)"}.`);
         },
       });
     } catch (e) {
-      toast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+      failure(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -1193,7 +1194,7 @@ function WorkspaceBar({
  * An import is not obviously reversible — it lands in whatever workspace is open, and undoing it
  * means deleting the pieces by hand. The two things worth knowing before saying yes are how much
  * arrives and whether the file carries secrets, so both are stated plainly rather than being
- * discovered afterwards in a toast.
+ * discovered afterwards in a notification.
  */
 function ImportSummaryBody({ sum, target }: { sum: ImportSummary; target: string }) {
   const n = (count: number, one: string, many = `${one}s`) =>
