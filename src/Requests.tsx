@@ -15,7 +15,7 @@ import {
   FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft, Send, Users,
 } from "lucide-react";
 import { subscribeTeams, teamsView, type TeamView } from "../shim/p2p.js";
-import { acknowledge, attachTab, teammateChange } from "./teamlive";
+import { acknowledge, attachTab, canManage, endSharing, teamMe, teammateChange } from "./teamlive";
 import {
   loadCollections, saveCollections, cancelRequest, envVars, newRequest, newId,
   loadHistory, saveHistory, paramsFromUrl, applyParamsToUrl, pathParamsFromUrl,
@@ -204,7 +204,8 @@ export default function Requests() {
           <p>What stays on this Deck: environment values, auth tokens and passwords, and the values of headers like Authorization, Cookie and X-Api-Key, unless they are only a {"{{variable}}"}. Each member fills in their own. History is never shared.</p>
         </div>
       ),
-      onConfirm: () => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, teamId: shareTeam.current } : x)) })),
+      onConfirm: () => void teamMe().then((me) => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, teamId: shareTeam.current, owner: me } : x)) })))
+        .catch((e) => console.warn("[requests] sharing the workspace failed", e)),
     });
   };
 
@@ -698,11 +699,11 @@ export default function Requests() {
     const cols = col.folders.filter((f) => f.workspaceId === id && f.parentId === null).length;
     const envs = col.environments.filter((e) => e.workspaceId === id).length;
     setConfirm({
-      title: `Delete the workspace ${w.name}?`,
+      title: w.teamId ? `Delete ${w.name} for everyone in the team?` : `Delete the workspace ${w.name}?`,
       body: `This also deletes its ${n(cols, "collection")} and ${n(envs, "environment")}; your other workspaces stay.`
-        + (w.teamId ? " It is shared with a team: it goes from this Deck only, and the others keep theirs." : ""),
+        + (w.teamId ? " It goes from every member's Deck, as they come online." : ""),
       confirmLabel: "Delete",
-      onConfirm: () => deleteWorkspace(id),
+      onConfirm: () => { if (w.teamId) void endSharing(id, "delete"); deleteWorkspace(id); },
     });
   };
 
@@ -810,7 +811,7 @@ export default function Requests() {
                 onDelete={askDeleteWorkspace}
                 teams={teams}
                 onShare={(w) => askShareWorkspace(w)}
-                onUnshare={(w) => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, teamId: undefined } : x)) }))}
+                onUnshare={(w) => void endSharing(w.id, "stop").then(() => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, teamId: undefined } : x)) })))}
                 onExport={(w) => exportWorkspaceFile(w.id)}
                 onImport={() => void importWorkspaceFile()}
                 onMenu={(x, y, items) => setMenu({ x, y, items, alignRight: true })}
@@ -1220,16 +1221,20 @@ function WorkspaceBar({
               const team = w.teamId ? teams.find((t) => t.id === w.teamId) : undefined;
               return {
                 label: w.name,
+                // Shared with a team: the same icon as beside the workspace's name.
+                ...(w.teamId ? { icon: Users } : {}),
                 hint: w.id === active?.id ? "●" : undefined,
                 onClick: () => onSwitch(w.id),
                 children: [
                   { label: "Rename…", icon: Pencil, onClick: () => rename(w) },
-                  w.teamId
-                    ? { label: `Stop sharing with ${team?.name ?? "the team"}`, icon: Users, onClick: () => onUnshare(w) }
-                    : { label: "Share with a team…", icon: Users, onClick: () => onShare(w) },
+                  // A shared workspace's sharer and the team's owner may stop sharing it or delete it for
+                  // everyone; the other members keep it, and say who shared it.
+                  ...(w.teamId
+                    ? canManage(w) ? [{ label: `Stop sharing with ${team?.name ?? "the team"}`, icon: Users, onClick: () => onUnshare(w) }] : []
+                    : [{ label: "Share with a team…", icon: Users, onClick: () => onShare(w) }]),
                   { label: "Export…", icon: Download, onClick: () => onExport(w) },
                   // The last workspace cannot go: with none left there is nowhere to put a request.
-                  ...(col.workspaces.length > 1 ? ["sep" as const, { label: "Delete", icon: Trash2, danger: true, onClick: () => onDelete(w.id) }] : []),
+                  ...(col.workspaces.length > 1 && (!w.teamId || canManage(w)) ? ["sep" as const, { label: "Delete", icon: Trash2, danger: true, onClick: () => onDelete(w.id) }] : []),
                 ],
               };
             }),

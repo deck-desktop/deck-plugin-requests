@@ -145,4 +145,30 @@ const moved = { ...pub, url: "https://attacker.example/a" };
 assert.equal((joinRequest(moved, secret).auth as { token: string }).token, "", "a teammate pointing it elsewhere does not get the token");
 // One kept before origins existed goes back as it did.
 assert.equal((joinRequest(moved, { token: "OLD" }).auth as { token: string }).token, "OLD");
+
+// ---- who may end a share: whoever shared it, or the team's owner ----
+{
+  const t0 = 2_000_000;
+  const shared: Collections = { ...emptyCollections(), workspaces: [{ id: "sw", name: "Shop", activeEnvId: null, teamId: "tm" }], activeWorkspaceId: "sw" };
+  // The sharer is told with the workspace, and kept.
+  const got = apply(shared, "sw", "tm", {}, [{ k: "w", rev: { t: t0, by: "alice" }, d: { name: "Shop", owner: "alice" } }], t0, "boss");
+  assert.equal(got.col.workspaces[0].owner, "alice");
+  const m1 = got.meta;
+  // Someone else cannot end it, nor take it over by saying they own it.
+  const bad = apply(got.col, "sw", "tm", m1, [{ k: "w", rev: { t: t0 + 1, by: "mallory" }, d: { name: "Shop", owner: "mallory", end: "delete" } }], t0, "boss");
+  assert.equal(bad.changed, false, "a member ended someone else's share");
+  const renamed = apply(got.col, "sw", "tm", m1, [{ k: "w", rev: { t: t0 + 1, by: "mallory" }, d: { name: "Shop 2", owner: "mallory" } }], t0, "boss");
+  assert.equal(renamed.col.workspaces[0].name, "Shop 2", "anyone may rename it");
+  assert.equal(renamed.col.workspaces[0].owner, "alice", "a rename cannot take it over");
+  // The sharer stopping: each member keeps a copy that is no longer shared.
+  const stopped = apply(got.col, "sw", "tm", m1, [{ k: "w", rev: { t: t0 + 2, by: "alice" }, d: { name: "Shop", owner: "alice", end: "stop" } }], t0, "boss");
+  assert.equal(stopped.col.workspaces[0].teamId, undefined);
+  assert.ok(stopped.col.workspaces.some((w) => w.id === "sw"), "a stopped share leaves a copy");
+  // The team's owner deleting it: it goes.
+  const deleted = apply(got.col, "sw", "tm", m1, [{ k: "w", rev: { t: t0 + 2, by: "boss" }, d: { name: "Shop", end: "delete" } }], t0, "boss");
+  assert.ok(!deleted.col.workspaces.some((w) => w.id === "sw"), "a deleted share stayed");
+  assert.equal(deleted.col.activeWorkspaceId, null);
+  // An end that is not one of the two is refused.
+  assert.equal(cleanRec({ k: "w", rev: { t: 10, by: "x" }, d: { name: "W", end: "wipe" } }, 1_000_000), null);
+}
 console.log("teamsync: all checks passed");

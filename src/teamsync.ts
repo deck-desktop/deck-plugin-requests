@@ -26,7 +26,7 @@ export function records(c: Collections, ws: string): Map<string, unknown> {
   const out = new Map<string, unknown>();
   const w = c.workspaces.find((x) => x.id === ws);
   if (!w) return out;
-  out.set("w", { name: w.name });
+  out.set("w", { name: w.name, ...(w.owner ? { owner: w.owner } : {}) });
   const parentOf = new Map<string, string>();
   for (const f of c.folders) if (f.workspaceId === ws) for (const ch of f.children) parentOf.set(ch, f.id);
   for (const f of c.folders) {
@@ -144,7 +144,12 @@ export function cleanRec(r: unknown, now: number): Rec | null {
   if (kind !== "w" && !validId(id)) return null;
   if (x.del) return kind === "w" ? null : { k: x.k, rev, del: true };
   const d = x.d as any;
-  if (kind === "w") { const name = str(d?.name, 300); return name === null ? null : { k: "w", rev, d: { name } }; }
+  if (kind === "w") {
+    const name = str(d?.name, 300), owner = d?.owner === undefined ? "" : str(d.owner, 64);
+    const end = d?.end === undefined ? undefined : d.end === "stop" || d.end === "delete" ? d.end : null;
+    if (name === null || owner === null || end === null) return null;
+    return { k: "w", rev, d: { name, ...(owner ? { owner } : {}), ...(end ? { end } : {}) } };
+  }
   if (kind === "f") {
     const name = str(d?.name, 300);
     const parentId = d?.parentId === null || d?.parentId === undefined ? null : validId(d.parentId) ? d.parentId : undefined;
@@ -161,12 +166,17 @@ export function cleanRec(r: unknown, now: number): Rec | null {
   return null;
 }
 
+/** Whether member `who` may stop sharing a workspace, or delete it for everyone: who shared it, or
+ *  the team's owner. */
+export const mayManage = (owner: string | undefined, who: string, teamOwner: string | undefined) =>
+  !!who && (who === owner || who === teamOwner);
+
 /**
  * Take another Deck's records that are newer than this one's. A workspace this Deck does not have
  * yet is made, shared with `team`. What this Deck keeps for itself stays: a variable's value, and a
  * credential the other side did not send.
  */
-export function apply(c: Collections, ws: string, team: string, meta: Meta, given: unknown[], now = Date.now()): { col: Collections; meta: Meta; changed: boolean } {
+export function apply(c: Collections, ws: string, team: string, meta: Meta, given: unknown[], now = Date.now(), teamOwner?: string): { col: Collections; meta: Meta; changed: boolean } {
   // Only records that are what they say (cleanRec), and not more of them than a workspace holds.
   const recs = given.slice(0, 20_000).flatMap((r) => cleanRec(r, now) ?? []);
   let col = c;
@@ -180,13 +190,26 @@ export function apply(c: Collections, ws: string, team: string, meta: Meta, give
   const requests = { ...col.requests };
   const envs = new Map(col.environments.map((e) => [e.id, e]));
   let wsName: string | null = null;
+  // Sharing ended by whoever may end it: "stop" leaves this Deck a copy of its own, "delete" takes it.
+  let end: "stop" | "delete" | null = null;
+  const owner = c.workspaces.find((w) => w.id === ws)?.owner;
   const parents = new Map<string, string>();
   for (const r of recs) {
     if (!newer(r.rev, next[r.k])) continue;
+    // An end from anyone else is not taken at all, so it cannot win over a later one that is.
+    const wd = r.k === "w" ? (r.d as { name?: string; owner?: string; end?: "stop" | "delete" } | undefined) : undefined;
+    if (wd?.end && !mayManage(owner ?? wd.owner, r.rev.by, teamOwner)) continue;
     next[r.k] = { ...r.rev, h: r.del ? "" : hash(r.d), ...(r.del ? { del: true } : {}) };
     changed = true;
     const [kind, id] = r.k.split(/:(.*)/s);
-    if (kind === "w") { if (!r.del) wsName = String((r.d as { name?: string }).name ?? "Shared"); continue; }
+    if (kind === "w") {
+      if (r.del) continue;
+      wsName = String(wd?.name ?? "Shared");
+      if (wd?.end) end = wd.end;
+      // A workspace new here is the sharer's: who that is comes with it, and never changes after.
+      if (!owner && wd?.owner) col = { ...col, workspaces: col.workspaces.map((w) => (w.id === ws && !w.owner ? { ...w, owner: wd.owner } : w)) };
+      continue;
+    }
     if (kind === "f") {
       if (r.del) { folders.delete(id); continue; }
       const d = r.d as Pick<Folder, "id" | "name" | "parentId" | "children">;
@@ -231,5 +254,19 @@ export function apply(c: Collections, ws: string, team: string, meta: Meta, give
     requests,
     environments: [...envs.values()],
   };
+  if (end === "stop") col = { ...col, workspaces: col.workspaces.map((w) => (w.id === ws ? { ...w, teamId: undefined } : w)) };
+  if (end === "delete") {
+    const gone = new Set(col.folders.filter((f) => f.workspaceId === ws).map((f) => f.id));
+    const kids = new Set(col.folders.filter((f) => gone.has(f.id)).flatMap((f) => f.children));
+    const rest = col.workspaces.filter((w) => w.id !== ws);
+    col = {
+      ...col,
+      workspaces: rest,
+      activeWorkspaceId: col.activeWorkspaceId === ws ? rest[0]?.id ?? null : col.activeWorkspaceId,
+      folders: col.folders.filter((f) => !gone.has(f.id)),
+      requests: Object.fromEntries(Object.entries(col.requests).filter(([id]) => !kids.has(id))),
+      environments: col.environments.filter((e) => e.workspaceId !== ws),
+    };
+  }
   return { col, meta: next, changed: true };
 }

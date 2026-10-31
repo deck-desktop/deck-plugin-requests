@@ -11,7 +11,7 @@
 import { teamChannel, myTeamId, subscribeTeams, teamsView, type TeamChannel, type Member } from "../shim/p2p.js";
 import { configRead, configWrite } from "../shim/bridge.js";
 import { loadCollections, saveCollections, setSaveHook, type Collections } from "./httpclient";
-import { apply, behind, digest, localChanges, newerThan, recsFor, type Meta, type Rec } from "./teamsync";
+import { apply, behind, digest, localChanges, mayManage, newerThan, recsFor, type Meta, type Rec } from "./teamsync";
 import { validId } from "./secrets";
 
 type Msg =
@@ -19,6 +19,9 @@ type Msg =
   | { t: "recs"; ws: string; recs: Rec[] };
 
 const META = "team-sync";
+/** Shares this Deck ended, by workspace: the end, told again to each member who connects. */
+const ENDED = "team-ended";
+let ended: Record<string, { team: string; rec: Rec }> = {};
 let col: Collections | null = null;
 let meta: Record<string, Meta> = {};
 let metaText = "";
@@ -57,6 +60,7 @@ function channels() {
 
 function hello(team: string, m: Member) {
   if (!col) return;
+  for (const [ws, e] of Object.entries(ended)) if (e.team === team) void chans.get(team)?.send({ t: "recs", ws, recs: [e.rec] }, m.id);
   for (const w of shared(col)) if (w.teamId === team) void chans.get(team)?.send({ t: "digest", ws: w.id, d: digest(meta[w.id] ?? {}), ask: true }, m.id);
 }
 
@@ -74,14 +78,15 @@ function onMsg(team: string, msg: Msg, from: Member) {
     if (keys.length) void ch?.send({ t: "recs", ws: msg.ws, recs: recsFor(col, msg.ws, m, keys) }, from.id);
     if (msg.ask && behind(m, msg.d)) void ch?.send({ t: "digest", ws: msg.ws, d: digest(m), ask: false }, from.id);
   } else if (msg.t === "recs" && Array.isArray(msg.recs)) {
-    const r = apply(col, msg.ws, team, m, msg.recs);
+    const teamOwner = teamsView().find((t) => t.id === team)?.ownerId;
+    const r = apply(col, msg.ws, team, m, msg.recs, Date.now(), teamOwner);
     if (!r.changed) return;
     meta[msg.ws] = r.meta;
     saveMeta();
     // Kept here at once, so a digest answered before the next save sends what these records say.
     col = r.col;
     // The same records against the open tab's own state (apply is pure); the tab saves it.
-    if (tab) tab((c) => apply(c, msg.ws, team, m, msg.recs).col);
+    if (tab) tab((c) => apply(c, msg.ws, team, m, msg.recs, Date.now(), teamOwner).col);
     else void saveCollections(r.col);
   }
 }
@@ -113,7 +118,11 @@ export async function startTeamSync() {
   if (stopped) return;
   metaText = t;
   try { meta = t.trim() ? JSON.parse(t) : {}; } catch { meta = {}; }
+  const e = await configRead(ENDED).catch(() => "");
+  try { ended = e.trim() ? JSON.parse(e) : {}; } catch { ended = {}; }
+  if (stopped) return;
   loadedMeta = true;
+  if (teamsView().length) void myTeamId().then((id) => { me ||= id; }).catch(() => {});
   col = col ?? c;
   // Joining or leaving a team opens or closes its channel; the teams already joined, now.
   unTeams = subscribeTeams(() => channels());
@@ -159,3 +168,34 @@ export function teammateChange(id: string): { name: string; key: string; t: numb
 }
 /** The person sending said yes to this version of the request: it is not asked about again. */
 export const acknowledge = (c: { key: string; t: number }) => void acked.set(c.key, c.t);
+
+/** This Deck's member id in its teams, once known. */
+export async function teamMe(): Promise<string> {
+  me ||= await myTeamId();
+  return me;
+}
+
+/** Whether this Deck may stop sharing a workspace, or delete it for everyone (teamsync.ts mayManage). */
+export function canManage(ws: { owner?: string; teamId?: string }): boolean {
+  return !!ws.teamId && mayManage(ws.owner, me, teamsView().find((t) => t.id === ws.teamId)?.ownerId);
+}
+
+/**
+ * End a workspace's share for every member: "stop" leaves each a copy of their own, "delete" takes it
+ * from them. Only its sharer or the team's owner may (the others ignore anyone else). Told to those
+ * online now and, kept in team-ended, to each member when they next connect.
+ */
+export async function endSharing(wsId: string, end: "stop" | "delete") {
+  const w = col?.workspaces.find((x) => x.id === wsId);
+  if (!w?.teamId) return;
+  await teamMe();
+  if (!canManage(w)) return;
+  const m = meta[wsId] ?? {};
+  const rev = { t: Math.max(Date.now(), (m.w?.t ?? 0) + 1), by: me };
+  const rec: Rec = { k: "w", rev, d: { name: w.name, ...(w.owner ? { owner: w.owner } : {}), end } };
+  meta[wsId] = { ...m, w: { ...rev, h: "" } };
+  saveMeta();
+  ended[wsId] = { team: w.teamId, rec };
+  await configWrite(ENDED, JSON.stringify(ended)).catch((e) => console.warn("[requests] saving the ended shares failed", e));
+  void chans.get(w.teamId)?.send({ t: "recs", ws: wsId, recs: [rec] });
+}

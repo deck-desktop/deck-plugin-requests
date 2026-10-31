@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A shared workspace shows the team icon in the workspace menu, and only whoever shared it or the
+  team's owner can stop sharing it or delete it for everyone.
 - The script worker is bundled by a `?worker` import rather than a deck-plugin.config.mjs, so the registry can
   rebuild and type-check it. Nothing changes in the plugin itself.
 

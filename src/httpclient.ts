@@ -98,6 +98,9 @@ export interface Workspace {
   id: string; name: string; activeEnvId: string | null;
   /** Shared with this Deck team (teamsync.ts): kept in step with its members. */
   teamId?: string;
+  /** The member who shared it: only they and the team's owner may stop sharing it or delete it for
+   *  everyone (teamsync.ts mayManage). */
+  owner?: string;
 }
 
 export interface Collections {

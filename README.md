@@ -20,7 +20,9 @@ A Postman-style HTTP client in a pane. Open it from the **+** beside your tabs a
 - **Shared workspaces**: share a workspace with a Deck team (Settings > Teams) from the workspace
   menu, and every member keeps it in step whenever they are online together. Environment values,
   auth tokens and passwords, and credential headers (Authorization, Cookie, X-Api-Key) stay on
-  each Deck unless they are only a `{{variable}}`; history is never shared.
+  each Deck unless they are only a `{{variable}}`; history is never shared. A shared workspace
+  has the team icon in the workspace menu. Only whoever shared it and the team's owner can stop
+  sharing it (everyone keeps a copy) or delete it for everyone; the others can edit and rename it.
 - Ctrl+Enter sends, Ctrl+S saves, F2 renames. Each can be rebound in Settings > Keybindings.
 
 Requests are sent by Deck itself, not the browser, so there is no CORS, with a 10 MB response cap,
