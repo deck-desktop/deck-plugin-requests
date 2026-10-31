@@ -10,7 +10,6 @@ import Requests from "./Requests";
 import { stopHttpSend } from "./httpsend";
 import { releaseWorker } from "./httpscript";
 import { startTeamSync, stopTeamSync } from "./teamlive";
-import { stopFolders } from "./folderstore";
 
 // Workspaces shared with a Deck team keep in step while the tab is closed too.
 void startTeamSync().catch((e) => console.warn("[requests] starting team sync failed", e));
@@ -42,7 +41,6 @@ export function Settings() {
 
 export function dispose() {
   stopTeamSync();
-  stopFolders();
   void stopHttpSend.then((f) => { if (f) f(); });
   releaseWorker();
 }

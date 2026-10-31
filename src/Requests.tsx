@@ -12,16 +12,14 @@ import { onKeys, useScope } from "../shim/ui.js";
 import { notice, failure } from "./notice";
 import {
   Plus, Trash2, FolderPlus, Loader2, Search, Globe, X, Upload, TerminalSquare, Download,
-  FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft, Send, Users, FolderOpen, FolderInput, FolderX,
+  FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft, Send, Users,
 } from "lucide-react";
-import { fileName, fromFiles, isWorkspace } from "./folderlayout";
-import { loadSecrets, onFolderChange, readFolder } from "./folderstore";
 import { subscribeTeams, teamsView, type TeamView } from "../shim/p2p.js";
 import { acknowledge, attachTab, teammateChange } from "./teamlive";
 import {
   loadCollections, saveCollections, cancelRequest, envVars, newRequest, newId,
   loadHistory, saveHistory, paramsFromUrl, applyParamsToUrl, pathParamsFromUrl,
-  newFolder, newWorkspace, moveNode, moveToRoot, subtree, parentOf, readWorkspaceFolder, withWorkspace,
+  newFolder, newWorkspace, moveNode, moveToRoot, subtree, parentOf,
   type Collections, type Request, type HttpResult, type BodyKind, type Workspace,
   type Environment,
   type HistoryEntry,
@@ -45,7 +43,7 @@ import CodeBox from "./CodeBox";
 import { parseCurl, toCurl } from "./curl";
 import { exportCollection, exportWorkspace, importCollection, parseExport, exportFilename,
   summarizeImport, type ImportSummary } from "./httpexport";
-import { pickSavePath, pickFile, pickFolder, fsRead, fsWrite } from "../shim/bridge.js";
+import { pickSavePath, pickFile, fsRead, fsWrite } from "../shim/bridge.js";
 import { setTemplateVars } from "./monacovars";
 import { type ScriptResult } from "./httpscript";
 import { runRequest, withScriptEnv } from "./httprun";
@@ -185,58 +183,6 @@ export default function Requests() {
   const loaded = !!col;
   useEffect(() => (loaded ? attachTab((f) => updateRef.current(f)) : undefined), [loaded]);
   const teams = useSyncExternalStore(subscribeTeams, teamsView);
-  const colRef = useRef(col);
-  colRef.current = col;
-  useEffect(() => onFolderChange((root) => {
-    const w = colRef.current?.workspaces.find((x) => x.folder === root);
-    if (!w) return;
-    void readWorkspaceFolder(w).then((parts) => { if (parts) updateRef.current((c) => withWorkspace(c, w.id, parts)); })
-      .catch((e) => console.warn("[requests] reading the changed workspace folder failed", e));
-  }), []);
-
-  /** Move a workspace into a folder of its own, in a folder the user picks (their project, say). */
-  const keepInFolder = async (w: Workspace) => {
-    const parent = await pickFolder().catch(() => "");
-    if (!parent) return;
-    const dir = parent.replace(/[\\/]+$/, "") + (parent.includes("\\") ? "\\" : "/") + fileName(w.name);
-    const there = await readFolder(dir, true).catch(() => null);
-    if (there && isWorkspace(there)) { failure(`${dir} already holds a workspace: open it with "Open a workspace folder…".`); return; }
-    setConfirm({
-      title: `Move "${w.name}" to a folder?`, confirmLabel: "Move it there", danger: false, wide: true,
-      body: (
-        <div className="flex flex-col gap-2 text-[12.5px] text-text-secondary">
-          <p>Its collections, folders and requests become files in <code className="text-text-primary">{dir}</code>, one per request, so the folder can go in your project's repository or a synced folder and be shared the way it is.</p>
-          <p>Environment values, auth tokens and passwords, and the values of headers like Authorization stay on this Deck, unless they are only a {"{{variable}}"}: whoever opens the folder fills in their own.</p>
-        </div>
-      ),
-      onConfirm: () => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, folder: dir } : x)) })),
-    });
-  };
-  /** Add a workspace someone keeps in a folder (a repository you cloned). */
-  const openWorkspaceFolder = async () => {
-    const dir = await pickFolder().catch(() => "");
-    if (!dir) return;
-    const files = await readFolder(dir, true).catch(() => null);
-    // Read once for its id, then again with the secrets this Deck has for that workspace.
-    const parts = files && isWorkspace(files) ? fromFiles(files) : null;
-    if (!parts) { failure("That folder does not hold a workspace (it has no workspace.json)."); return; }
-    const secrets = (await loadSecrets())[parts.id];
-    const full = fromFiles(files!, secrets)!;
-    update((c) => {
-      const has = c.workspaces.some((x) => x.id === full.id);
-      const workspaces = has
-        ? c.workspaces.map((x) => (x.id === full.id ? { ...x, folder: dir } : x))
-        : [...c.workspaces, { id: full.id, name: full.name, activeEnvId: null, folder: dir }];
-      return { ...withWorkspace({ ...c, workspaces }, full.id, full), activeWorkspaceId: full.id };
-    });
-    setTabs([]); setActiveId(null);
-    if (full.skipped.length) failure(`Opened, but ${full.skipped.length} file(s) could not be read`, full.skipped.slice(0, 3).join(", "));
-  };
-  /** Back into the collections file. The folder's files stay where they are. */
-  const stopFolder = (w: Workspace) => {
-    update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, folder: undefined } : x)) }));
-    notice(`"${w.name}" is kept in Deck again. Its files in ${w.folder} were left as they are.`);
-  };
 
   const shareTeam = useRef("");
   const askShareWorkspace = (w: Workspace) => {
@@ -864,9 +810,6 @@ export default function Requests() {
                 onDelete={askDeleteWorkspace}
                 teams={teams}
                 onShare={(w) => askShareWorkspace(w)}
-                onKeepInFolder={(w) => void keepInFolder(w)}
-                onOpenFolder={() => void openWorkspaceFolder()}
-                onStopFolder={stopFolder}
                 onUnshare={(w) => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, teamId: undefined } : x)) }))}
                 onExport={(w) => exportWorkspaceFile(w.id)}
                 onImport={() => void importWorkspaceFile()}
@@ -1242,7 +1185,7 @@ export default function Requests() {
  * without resizing it, which is the same drift the fixed slot exists to prevent.
  */
 function WorkspaceBar({
-  col, active, onSwitch, onAdd, onRename, onDelete, teams, onShare, onUnshare, onKeepInFolder, onOpenFolder, onStopFolder, onExport, onImport, onMenu,
+  col, active, onSwitch, onAdd, onRename, onDelete, teams, onShare, onUnshare, onExport, onImport, onMenu,
 }: {
   col: Collections;
   active: Workspace | null;
@@ -1253,9 +1196,6 @@ function WorkspaceBar({
   teams: TeamView[];
   onShare: (w: Workspace) => void;
   onUnshare: (w: Workspace) => void;
-  onKeepInFolder: (w: Workspace) => void;
-  onOpenFolder: () => void;
-  onStopFolder: (w: Workspace) => void;
   onExport: (w: Workspace) => void;
   onImport: () => void;
   onMenu: (x: number, y: number, items: MenuEntry[]) => void;
@@ -1287,9 +1227,6 @@ function WorkspaceBar({
                   w.teamId
                     ? { label: `Stop sharing with ${team?.name ?? "the team"}`, icon: Users, onClick: () => onUnshare(w) }
                     : { label: "Share with a team…", icon: Users, onClick: () => onShare(w) },
-                  w.folder
-                    ? { label: "Move back into Deck", icon: FolderX, onClick: () => onStopFolder(w) }
-                    : { label: "Move to a folder…", icon: FolderInput, onClick: () => onKeepInFolder(w) },
                   { label: "Export…", icon: Download, onClick: () => onExport(w) },
                   // The last workspace cannot go: with none left there is nowhere to put a request.
                   ...(col.workspaces.length > 1 ? ["sep" as const, { label: "Delete", icon: Trash2, danger: true, onClick: () => onDelete(w.id) }] : []),
@@ -1298,14 +1235,12 @@ function WorkspaceBar({
             }),
             "sep" as const,
             { label: "New workspace", icon: Plus, onClick: onAdd },
-            { label: "Open a workspace folder…", icon: FolderOpen, onClick: onOpenFolder },
             { label: "Import a workspace file…", icon: Upload, onClick: onImport },
           ]);
         }}
         className="flex h-7 min-w-0 items-center gap-1 rounded-lg px-2 text-[12px] text-text-primary transition-colors hover:bg-white/5"
         title="Switch workspace"
       >
-        {active?.folder && <span title={`Kept in ${active.folder}`} className="shrink-0 text-text-muted"><FolderOpen size={12} /></span>}
         <span className="max-w-[110px] truncate font-medium">{active?.name ?? "No workspace"}</span>
         {teamOf && (
           <span className="flex items-center gap-0.5 text-[11px] text-text-muted" title={`Shared with ${teamOf.name}: ${online} other${online === 1 ? "" : "s"} online`}>

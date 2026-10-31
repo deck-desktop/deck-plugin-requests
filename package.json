@@ -7,7 +7,7 @@
     "build": "deck-plugin build",
     "dev": "deck-plugin dev",
     "install-local": "deck-plugin install",
-    "test": "tsx src/curl.check.ts && tsx src/teamsync.check.ts && tsx src/folderlayout.check.ts && tsx src/httpclient.check.ts && tsx src/httpexport.check.ts && tsx src/httpscript.check.ts && tsx src/paint.check.ts"
+    "test": "tsx src/curl.check.ts && tsx src/teamsync.check.ts && tsx src/httpclient.check.ts && tsx src/httpexport.check.ts && tsx src/httpscript.check.ts && tsx src/paint.check.ts"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.11.1",

@@ -10,8 +10,7 @@
 // (and is saved by the tab, as an edit there would be); with no tab, it is written here.
 import { teamChannel, myTeamId, subscribeTeams, teamsView, type TeamChannel, type Member } from "../shim/p2p.js";
 import { configRead, configWrite } from "../shim/bridge.js";
-import { loadCollections, readWorkspaceFolder, saveCollections, setSaveHook, withWorkspace, type Collections } from "./httpclient";
-import { onFolderChange } from "./folderstore";
+import { loadCollections, saveCollections, setSaveHook, type Collections } from "./httpclient";
 import { apply, behind, digest, localChanges, newerThan, recsFor, type Meta, type Rec } from "./teamsync";
 import { validId } from "./secrets";
 
@@ -27,7 +26,6 @@ let me = "";
 let stopped = false;
 let loadedMeta = false;
 let unTeams: (() => void) | null = null;
-let unFolders: (() => void) | null = null;
 // Typed loosely: a record's data is whatever JSON the record holds.
 const chans = new Map<string, TeamChannel<any>>();
 /** The open tab's way in: it applies a change to its own state, then saves it. */
@@ -120,14 +118,6 @@ export async function startTeamSync() {
   // Joining or leaving a team opens or closes its channel; the teams already joined, now.
   unTeams = subscribeTeams(() => channels());
   channels();
-  // A folder workspace changed underneath (a git pull) while no tab is open: what changed goes to
-  // the team. With the tab open, the tab reads it and its save does the same.
-  unFolders = onFolderChange((root) => {
-    const w = col?.workspaces.find((x) => x.folder === root);
-    if (!w || tab) return;
-    void readWorkspaceFolder(w).then((parts) => { if (parts && col) saved(withWorkspace(col, w.id, parts)); })
-      .catch((e) => console.warn("[requests] reading the changed workspace folder failed", e));
-  });
   // Edits made while no one was connected (or before this ran) are counted now.
   saved(col ?? c);
 }
@@ -137,8 +127,6 @@ export function stopTeamSync() {
   setSaveHook(null);
   unTeams?.();
   unTeams = null;
-  unFolders?.();
-  unFolders = null;
   for (const ch of chans.values()) ch.close();
   chans.clear();
 }

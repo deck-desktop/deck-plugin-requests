@@ -1,6 +1,5 @@
-// What counts as a secret in a request or an environment, for everything that sends or stores one
-// somewhere other than this Deck: a team (teamsync.ts) and a workspace kept in a folder
-// (folderlayout.ts). Both keep the same things back, so a folder in git and a team see the same.
+// What counts as a secret in a request or an environment, for what is sent to a Deck team
+// (teamsync.ts): it stays on this Deck.
 //
 // Kept back: environment values (each Deck keeps its own value for a variable, by name), and
 // credentials (an auth token or password, the value of a header like Authorization, Cookie or
@@ -11,8 +10,8 @@ import type { Environment, Request, Row } from "./httpclient";
 const isRef = (v: string) => /^\s*\{\{[^}]+\}\}\s*$/.test(v);
 
 /**
- * Whether an id is one this plugin could have made (newId: letters and digits). An id from a folder
- * or a teammate becomes part of a file's name and a key in the collections, so anything else (a
+ * Whether an id is one this plugin could have made (newId: letters and digits). An id from a
+ * teammate becomes a key in the collections, so anything else (a
  * path, "..", a huge string) is refused rather than trusted.
  */
 export const validId = (s: unknown): s is string => typeof s === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(s);
@@ -26,7 +25,7 @@ export const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-coo
 const keep = (v: string) => (isRef(v) ? v : "");
 
 /** A request's credentials, kept on this Deck: by header name (lower case) for headers, and the
- *  `origin` they were for, so a teammate or a folder that points the request elsewhere does not
+ *  `origin` they were for, so a teammate who points the request elsewhere does not
  *  get them sent there. */
 export interface ReqSecrets { token?: string; pass?: string; headers?: Record<string, string>; origin?: string }
 

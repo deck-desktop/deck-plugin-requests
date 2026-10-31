@@ -5,9 +5,6 @@
 // file-watcher apply the change live. The file is read and written through the server's own
 // helpers, handed in by init(), so the path is resolved in exactly one place (and follows DECK_DEV).
 import type { DeckMcp } from "../shim/mcp.js";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { fromFiles, safePath, toFiles, type Files, type WsParts, type WsSecrets } from "./folderlayout";
 
 let deck: DeckMcp;
 const readJson = <T,>(name: string, fallback: T): T => deck.readJson(name, fallback);
@@ -58,7 +55,7 @@ export interface Environment {
   workspaceId: string;
 }
 
-export interface Workspace { id: string; name: string; activeEnvId: string | null; teamId?: string; folder?: string }
+export interface Workspace { id: string; name: string; activeEnvId: string | null; teamId?: string }
 
 export interface Collections {
   workspaces: Workspace[];
@@ -71,93 +68,18 @@ export interface Collections {
 export function read(): Collections {
   // Each field defaulted rather than trusting the file: a half-written or hand-edited
   // collections file should read as empty, not crash every tool that touches it.
-  const f = readJson<Partial<Collections>>(FILE, {});
-  let c: Collections = {
-    workspaces: f.workspaces ?? [],
-    activeWorkspaceId: f.activeWorkspaceId ?? null,
-    folders: f.folders ?? [],
-    requests: f.requests ?? {},
-    environments: f.environments ?? [],
+  const c = readJson<Partial<Collections>>(FILE, {});
+  return {
+    workspaces: c.workspaces ?? [],
+    activeWorkspaceId: c.activeWorkspaceId ?? null,
+    folders: c.folders ?? [],
+    requests: c.requests ?? {},
+    environments: c.environments ?? [],
   };
-  // A workspace kept in a folder (folderlayout.ts) is read from it, as the app reads it.
-  const secrets = readJson<Record<string, WsSecrets>>(SECRETS, {});
-  for (const w of c.workspaces) {
-    if (!w.folder) continue;
-    try {
-      const parts = fromFiles(readFolder(w.folder), secrets[w.id]);
-      if (parts) c = withWorkspace(c, w.id, { ...parts, id: w.id } as unknown as WsParts);
-    } catch { /* a folder that is away reads as empty, and is not written */ }
-  }
-  return c;
 }
 
 export function write(c: Collections) {
-  const secrets = readJson<Record<string, WsSecrets>>(SECRETS, {});
-  let file = c;
-  for (const w of c.workspaces) {
-    if (!w.folder || !existsSync(w.folder)) continue;
-    const { files, secrets: kept } = toFiles(partsOf(c, w.id) as unknown as WsParts);
-    writeFolder(w.folder, files);
-    secrets[w.id] = kept;
-    file = withWorkspace(file, w.id, { id: w.id, name: w.name, folders: [], requests: {}, environments: [] });
-  }
-  if (c.workspaces.some((w) => w.folder)) writeJson(SECRETS, secrets);
-  writeJson(FILE, file);
-}
-
-// ---- workspaces kept in a folder, through node (the app does it through the bridge, folderstore.ts) ----
-
-const SECRETS = "folder-secrets";
-
-/** A folder's own files: its directories with a folder.json, and environments/. */
-function readFolder(root: string): Files {
-  const files: Files = new Map();
-  const walk = (dir: string, rel: string) => {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    if (rel && rel !== "environments" && !entries.some((e) => e.isFile() && e.name === "folder.json")) return;
-    for (const e of entries) {
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) { if (!e.name.startsWith(".") && e.name !== "node_modules") walk(join(dir, e.name), r); }
-      else if (e.name.endsWith(".json")) files.set(r, readFileSync(join(dir, e.name), "utf8"));
-    }
-  };
-  walk(root, "");
-  return files;
-}
-
-/** Write what changed, and take away the workspace's files it no longer has. */
-function writeFolder(root: string, files: Files) {
-  const prev = readFolder(root);
-  for (const [rel, text] of files) {
-    if (!safePath(rel)) continue; // only paths that stay inside the folder
-    if (prev.get(rel) === text) continue;
-    const at = join(root, ...rel.split("/"));
-    mkdirSync(join(at, ".."), { recursive: true });
-    writeFileSync(at, text, "utf8");
-  }
-  for (const rel of prev.keys()) if (!files.has(rel)) rmSync(join(root, ...rel.split("/")), { force: true });
-}
-
-function partsOf(c: Collections, ws: string) {
-  const w = c.workspaces.find((x) => x.id === ws);
-  const folders = c.folders.filter((f) => f.workspaceId === ws);
-  const requests: Record<string, Request> = {};
-  for (const f of folders) for (const ch of f.children) if (c.requests[ch]) requests[ch] = c.requests[ch];
-  return { id: ws, name: w?.name ?? "Workspace", folders, requests, environments: c.environments.filter((e) => e.workspaceId === ws) };
-}
-
-function withWorkspace(c: Collections, ws: string, parts: WsParts): Collections {
-  const old = partsOf(c, ws);
-  const requests = { ...c.requests };
-  for (const id of Object.keys(old.requests)) delete requests[id];
-  Object.assign(requests, parts.requests);
-  return {
-    ...c,
-    workspaces: c.workspaces.map((w) => (w.id === ws ? { ...w, name: parts.name } : w)),
-    folders: [...c.folders.filter((f) => f.workspaceId !== ws), ...parts.folders.map((f) => ({ ...f, workspaceId: ws }))],
-    requests,
-    environments: [...c.environments.filter((e) => e.workspaceId !== ws), ...parts.environments.map((e) => ({ ...e, workspaceId: ws }))],
-  } as Collections;
+  writeJson(FILE, c);
 }
 
 /**
