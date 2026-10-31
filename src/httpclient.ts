@@ -3,6 +3,8 @@
 // Collections live in %APPDATA%\Deck\requests-collections.json, on this machine, in Deck's config
 // dir like every other config.
 import { configRead, configWrite, httpSendAs, httpCancel } from "../shim/bridge.js";
+import { fromFiles, toFiles, type WsParts } from "./folderlayout";
+import { folderAway, lastRead, loadSecrets, readFolder, saveSecrets, watchFolders, writeFolder } from "./folderstore";
 import { dynamicValues } from "./httpdynamic";
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -94,7 +96,13 @@ export interface Environment {
 }
 
 /** A top-level partition: its own collections, its own environments, its own active one. */
-export interface Workspace { id: string; name: string; activeEnvId: string | null }
+export interface Workspace {
+  id: string; name: string; activeEnvId: string | null;
+  /** Shared with this Deck team (teamsync.ts): kept in step with its members. */
+  teamId?: string;
+  /** Kept in this folder, a file per request (folderlayout.ts), rather than in the collections file. */
+  folder?: string;
+}
 
 export interface Collections {
   workspaces: Workspace[];
@@ -120,6 +128,10 @@ export const newRequest = (name = "New Request"): Request => ({
 const STORE = "requests-collections";
 
 export async function loadCollections(): Promise<Collections> {
+  return withFolders(await loadFile());
+}
+
+async function loadFile(): Promise<Collections> {
   // Every path goes through migrate, including the empty one: it is what creates the default
   // workspace, and without a workspace there is nowhere to put a collection — the sidebar's
   // add button would do nothing on a fresh install.
@@ -132,6 +144,57 @@ export async function loadCollections(): Promise<Collections> {
   } catch {
     return migrate(emptyCollections());
   }
+}
+
+// ---- workspaces kept in a folder (folderlayout.ts, folderstore.ts) ----------
+
+/** A workspace's part of the collections: its folders, their requests, its environments. */
+export function workspaceParts(c: Collections, ws: string): WsParts {
+  const w = c.workspaces.find((x) => x.id === ws);
+  const folders = c.folders.filter((f) => f.workspaceId === ws);
+  const requests: Record<string, Request> = {};
+  for (const f of folders) for (const ch of f.children) if (c.requests[ch]) requests[ch] = c.requests[ch];
+  return { id: ws, name: w?.name ?? "Workspace", folders, requests, environments: c.environments.filter((e) => e.workspaceId === ws) };
+}
+
+/** The collections with workspace `ws`'s part replaced by `parts` (read from its folder). */
+export function withWorkspace(c: Collections, ws: string, parts: WsParts): Collections {
+  const old = workspaceParts(c, ws);
+  const requests = { ...c.requests };
+  for (const id of Object.keys(old.requests)) delete requests[id];
+  Object.assign(requests, parts.requests);
+  return {
+    ...c,
+    workspaces: c.workspaces.map((w) => (w.id === ws ? { ...w, name: parts.name } : w)),
+    folders: [...c.folders.filter((f) => f.workspaceId !== ws), ...parts.folders.map((f) => ({ ...f, workspaceId: ws }))],
+    requests,
+    environments: [...c.environments.filter((e) => e.workspaceId !== ws), ...parts.environments.map((e) => ({ ...e, workspaceId: ws }))],
+  };
+}
+
+/** Read every folder workspace's part from its folder, with this Deck's secrets put back. */
+async function withFolders(c: Collections): Promise<Collections> {
+  const kept = c.workspaces.filter((w) => w.folder);
+  if (!kept.length) return c;
+  const secrets = await loadSecrets();
+  for (const w of kept) {
+    try {
+      const parts = fromFiles(await readFolder(w.folder!), secrets[w.id]);
+      if (parts) c = withWorkspace(c, w.id, { ...parts, id: w.id });
+      else console.warn(`[requests] ${w.folder} is not a workspace folder any more`);
+    } catch (e) {
+      console.warn(`[requests] reading the workspace folder ${w.folder} failed`, e);
+    }
+  }
+  watchFolders(kept.map((w) => w.folder!));
+  return c;
+}
+
+/** Read one folder workspace again (its folder changed underneath). Null when it cannot be read. */
+export async function readWorkspaceFolder(w: Workspace): Promise<WsParts | null> {
+  if (!w.folder) return null;
+  const parts = fromFiles(lastRead(w.folder) ?? await readFolder(w.folder), (await loadSecrets())[w.id]);
+  return parts && { ...parts, id: w.id };
 }
 
 /**
@@ -174,8 +237,30 @@ export function migrate(c: Collections): Collections {
   return { ...c, workspaces, activeWorkspaceId, folders, environments };
 }
 
-export const saveCollections = (c: Collections) =>
-  configWrite(STORE, JSON.stringify(c, null, 2)).catch((e) => console.warn("[requests] collections save failed", e));
+let saveHook: ((c: Collections) => void) | null = null;
+/** Told of every save: team sync (teamlive.ts) sends what changed in a shared workspace. */
+export const setSaveHook = (f: ((c: Collections) => void) | null) => { saveHook = f; };
+
+export const saveCollections = async (c: Collections) => {
+  saveHook?.(c);
+  // A folder workspace's part goes to its folder (its secrets to this Deck's own config), and only
+  // its name and place to the collections file. One whose folder could not be read or written
+  // stays in the collections file too, so nothing is lost while its folder is away.
+  const kept = c.workspaces.filter((w) => w.folder);
+  let file = c;
+  for (const w of kept) {
+    const { files, secrets } = toFiles(workspaceParts(c, w.id));
+    const wrote = !folderAway(w.folder!) && await writeFolder(w.folder!, files).then(() => true, (e) => {
+      console.warn(`[requests] saving to the workspace folder ${w.folder} failed`, e);
+      return false;
+    });
+    if (!wrote) continue;
+    await saveSecrets(w.id, secrets);
+    file = withWorkspace(file, w.id, { id: w.id, name: w.name, folders: [], requests: {}, environments: [] });
+  }
+  if (kept.length) watchFolders(kept.map((w) => w.folder!));
+  return configWrite(STORE, JSON.stringify(file, null, 2)).catch((e) => console.warn("[requests] collections save failed", e));
+};
 
 // ---- tree ------------------------------------------------------------------
 //

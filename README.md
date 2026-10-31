@@ -17,6 +17,15 @@ A Postman-style HTTP client in a pane. Open it from the **+** beside your tabs a
 - **Export and import** a collection or a whole workspace as a JSON file, with or without its
   secrets.
 - **History** of the last 200 requests sent.
+- **Shared workspaces**: share a workspace with a Deck team (Settings > Teams) from the workspace
+  menu, and every member keeps it in step whenever they are online together. Environment values,
+  auth tokens and passwords, and credential headers (Authorization, Cookie, X-Api-Key) stay on
+  each Deck unless they are only a `{{variable}}`; history is never shared.
+- **Workspaces kept in a folder**: "Move to a folder…" in the workspace's menu moves it into a
+  folder you pick (your project's repository, a synced folder), one JSON file per request, so it
+  is shared the way that folder is. "Open a workspace folder…" adds one someone else keeps.
+  Changes made to the folder outside Deck (a git pull) show up at once. The same secrets stay on
+  this Deck as for a team; whoever opens the folder fills in their own.
 - Ctrl+Enter sends, Ctrl+S saves, F2 renames. Each can be rebound in Settings > Keybindings.
 
 Requests are sent by Deck itself, not the browser, so there is no CORS, with a 10 MB response cap,
@@ -24,7 +33,9 @@ a 60 second timeout and a Cancel button.
 
 Data lives in `data\requests\` in Deck's config folder on this machine:
 `requests-collections.json` and `requests-history.json`. A backup includes the collections; the
-history is left out because it holds every request sent, credentials included.
+history is left out because it holds every request sent, credentials included. A workspace kept
+in a folder lives in that folder, which a backup does not include (its secrets, in
+`folder-secrets.json`, it does).
 
 ## For agents
 
