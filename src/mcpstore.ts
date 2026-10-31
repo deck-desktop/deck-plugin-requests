@@ -7,7 +7,7 @@
 import type { DeckMcp } from "../shim/mcp.js";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fromFiles, toFiles, type Files, type WsParts, type WsSecrets } from "./folderlayout";
+import { fromFiles, safePath, toFiles, type Files, type WsParts, type WsSecrets } from "./folderlayout";
 
 let deck: DeckMcp;
 const readJson = <T,>(name: string, fallback: T): T => deck.readJson(name, fallback);
@@ -129,6 +129,7 @@ function readFolder(root: string): Files {
 function writeFolder(root: string, files: Files) {
   const prev = readFolder(root);
   for (const [rel, text] of files) {
+    if (!safePath(rel)) continue; // only paths that stay inside the folder
     if (prev.get(rel) === text) continue;
     const at = join(root, ...rel.split("/"));
     mkdirSync(join(at, ".."), { recursive: true });

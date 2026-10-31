@@ -4,7 +4,8 @@
 //   npx tsx src/teamsync.check.ts
 import assert from "node:assert/strict";
 import { emptyCollections, newRequest, type Collections } from "./httpclient";
-import { apply, behind, digest, localChanges, newerThan, records, recsFor, type Meta, type Rec } from "./teamsync";
+import { apply, behind, cleanRec, digest, localChanges, newerThan, records, recsFor, type Meta, type Rec } from "./teamsync";
+import { joinRequest, splitRequest } from "./secrets";
 
 const WS = "ws1", TEAM = "team1";
 let clock = 1000;
@@ -112,4 +113,36 @@ same();
 
 // The private workspace was never touched or sent.
 assert.ok(a.requests.rp && !b.requests.rp);
+
+// ---- what another Deck may send (the security review's H2, H3, M5) ----
+const now = 1_000_000;
+const good = { k: "r:ok1", rev: { t: now, by: "peer" }, d: { ...newRequest("x"), id: "ok1", url: "https://a.example/x", parent: "f1" } };
+assert.ok(cleanRec(good, now), "a well-formed request record is taken");
+// An id that is a path, or "..", is refused: ids become file names and keys.
+assert.equal(cleanRec({ ...good, k: "r:../../evil" }, now), null);
+assert.equal(cleanRec({ ...good, k: "f:a/b", d: { name: "x", parentId: null, children: [] } }, now), null);
+assert.equal(cleanRec({ k: "f:f9", rev: good.rev, d: { name: "x", parentId: null, children: ["ok", "../x"] } }, now), null, "a child id that is a path");
+// A revision from far in the future would win over every later edit: refused.
+assert.equal(cleanRec({ ...good, rev: { t: now + 24 * 3600_000, by: "peer" } }, now), null);
+assert.equal(cleanRec({ ...good, rev: { t: "soon", by: "peer" } }, now), null);
+// The wrong shape is refused, not half-taken: a method that is not one, headers that are not rows.
+assert.equal(cleanRec({ ...good, d: { ...good.d, method: "GET /x" } }, now), null);
+assert.equal(cleanRec({ ...good, d: { ...good.d, headers: "Authorization: x" } }, now), null);
+// Fields a request does not have are dropped.
+assert.equal((cleanRec({ ...good, d: { ...good.d, evil: 1 } }, now)!.d as Record<string, unknown>).evil, undefined);
+// A form row that uploads a file arrives without its path: it named a file on the sender's machine.
+const up = cleanRec({ ...good, d: { ...good.d, bodyKind: "form", formRows: [{ on: true, key: "f", value: "C:\Users\me\.ssh\id_rsa", kind: "file" }] } }, now)!;
+assert.equal((up.d as { formRows: { value: string; kind?: string }[] }).formRows[0].value, "");
+assert.equal((up.d as { formRows: { kind?: string }[] }).formRows[0].kind, "file");
+// apply takes only what cleanRec does.
+const before = apply(a, WS, TEAM, {}, [], now).col;
+assert.equal(apply(before, WS, TEAM, {}, [{ ...good, k: "r:../x" }], now).changed, false);
+// H3: a kept credential goes back only on a request that still goes where it was for.
+const withToken = { ...newRequest("t"), id: "t1", url: "https://api.example/a", auth: { kind: "bearer" as const, token: "SECRET" } };
+const { pub, secret } = splitRequest(withToken);
+assert.equal(joinRequest(pub, secret).auth.kind === "bearer" && (joinRequest(pub, secret).auth as { token: string }).token, "SECRET");
+const moved = { ...pub, url: "https://attacker.example/a" };
+assert.equal((joinRequest(moved, secret).auth as { token: string }).token, "", "a teammate pointing it elsewhere does not get the token");
+// One kept before origins existed goes back as it did.
+assert.equal((joinRequest(moved, { token: "OLD" }).auth as { token: string }).token, "OLD");
 console.log("teamsync: all checks passed");

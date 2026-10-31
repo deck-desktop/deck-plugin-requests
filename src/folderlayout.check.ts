@@ -4,7 +4,7 @@
 //   npx tsx src/folderlayout.check.ts
 import assert from "node:assert/strict";
 import { newRequest } from "./httpclient";
-import { fileName, fromFiles, isWorkspace, toFiles, type WsParts } from "./folderlayout";
+import { fileName, fromFiles, isWorkspace, safePath, toFiles, type WsParts } from "./folderlayout";
 
 const parts: WsParts = {
   id: "ws1", name: "Team API",
@@ -80,4 +80,22 @@ assert.equal(fileName('a/b:c*?"<>|'), "a-b-c------");
 assert.equal(fileName("CON"), "_CON");
 assert.equal(fileName("trailing. "), "trailing");
 assert.equal(fileName(""), "untitled");
+
+// Paths that would leave the folder are not written; ids that are paths are not read.
+assert.ok(safePath("Users/Get user.json") && safePath("environments/Dev.json"));
+for (const bad of ["../x.json", "a/../../x.json", "C:/x.json", "a\b.json", "", "a//b.json", "/x.json"]) assert.ok(!safePath(bad), bad);
+const evil = new Map([
+  ["workspace.json", JSON.stringify({ deck: "deck-requests-workspace", id: "ws1", name: "W", collections: ["c1"] })],
+  ["Users/folder.json", JSON.stringify({ id: "c1", name: "Users", children: ["../../x", "r1"] })],
+  ["Users/a.json", JSON.stringify({ id: "../../evil", url: "https://x" })],
+  ["Users/b.json", JSON.stringify({ id: "r1", url: "https://x" })],
+]);
+const fromEvil = fromFiles(evil)!;
+assert.deepEqual(Object.keys(fromEvil.requests), ["r1"], "a request whose id is a path is skipped");
+assert.deepEqual(fromEvil.folders[0].children, ["r1"], "a child id that is a path is dropped");
+assert.equal(fromFiles(new Map([["workspace.json", JSON.stringify({ deck: "deck-requests-workspace", id: "../ws" })]])), null);
+// Two requests with one name: the second's file name has its id in it, still a plain name.
+const twice = toFiles({ id: "w", name: "W", environments: [], requests: { a1: { ...newRequest("Same"), id: "a1" }, a2: { ...newRequest("Same"), id: "a2" } },
+  folders: [{ id: "c1", name: "C", workspaceId: "w", parentId: null, children: ["a1", "a2"] }] });
+assert.ok([...twice.files.keys()].every(safePath));
 console.log("folderlayout: all checks passed");

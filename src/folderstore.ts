@@ -6,7 +6,7 @@
 // folder-secrets, by workspace.
 import { configRead, configWrite, fsCreateDir, fsDelete, fsList, fsRead, fsWrite, watchFiles } from "../shim/bridge.js";
 import { listen } from "../shim/event.js";
-import type { Files, WsSecrets } from "./folderlayout";
+import { safePath, type Files, type WsSecrets } from "./folderlayout";
 
 const SECRETS = "folder-secrets";
 const sep = (root: string) => (root.includes("\\") ? "\\" : "/");
@@ -55,7 +55,9 @@ const dirsOf = (files: Files) => {
 };
 
 /** Write a workspace's files: only those that changed; those it no longer has go, and so does a directory left empty. */
-export function writeFolder(root: string, files: Files): Promise<void> {
+export function writeFolder(root: string, all: Files): Promise<void> {
+  // Only paths that stay inside the folder (toFiles makes no others; this is the last line).
+  const files: Files = new Map([...all].filter(([p]) => safePath(p)));
   const run = async () => {
     if (unreadable.has(root)) throw new Error(`${root} could not be read`);
     const prev = last.get(root) ?? new Map<string, string>();

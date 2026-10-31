@@ -18,7 +18,7 @@
 //
 // Secrets never go in the folder (secrets.ts): they stay on this Deck, in WsSecrets.
 import type { Environment, Folder, Request } from "./httpclient";
-import { joinEnv, joinRequest, splitEnv, splitRequest, type EnvShape, type ReqSecrets } from "./secrets";
+import { joinEnv, joinRequest, splitEnv, splitRequest, validId, type EnvShape, type ReqSecrets } from "./secrets";
 
 /** A folder's files: path relative to it, with "/" → text. */
 export type Files = Map<string, string>;
@@ -48,7 +48,7 @@ export function toFiles(parts: WsParts): { files: Files; secrets: WsSecrets } {
   /** One name per entry in a directory: a second one with the same name gets its id after it. */
   const unique = (taken: Set<string>, base: string, id: string) => {
     let n = fileName(base);
-    if (taken.has(n.toLowerCase())) n = `${n} (${id})`;
+    if (taken.has(n.toLowerCase())) n = fileName(`${n} (${id})`);
     taken.add(n.toLowerCase());
     return n;
   };
@@ -79,6 +79,11 @@ export function toFiles(parts: WsParts): { files: Files; secrets: WsSecrets } {
   return { files, secrets };
 }
 
+/** Whether a file's path stays inside the folder: plain names, no "..", no drive or separator of its
+ *  own. Both stores write only these. */
+export const safePath = (rel: string) =>
+  rel.split("/").every((seg) => seg !== "" && seg !== "." && seg !== ".." && !/[\\:<>"|?*\u0000-\u001f]/.test(seg));
+
 /** Whether a folder's files are a workspace: its workspace.json says so. */
 export function isWorkspace(files: Files): boolean {
   try { return JSON.parse(files.get("workspace.json") ?? "").deck === MARK; } catch { return false; }
@@ -92,7 +97,7 @@ export function fromFiles(files: Files, secrets?: WsSecrets): (WsParts & { skipp
   const skipped: string[] = [];
   const read = <T,>(p: string): T | null => { try { return JSON.parse(files.get(p)!) as T; } catch { skipped.push(p); return null; } };
   const head = read<{ deck?: string; id?: string; name?: string; collections?: string[] }>("workspace.json");
-  if (!head || head.deck !== MARK || typeof head.id !== "string") return null;
+  if (!head || head.deck !== MARK || !validId(head.id)) return null;
   const ws = head.id;
   const folders = new Map<string, Folder>();
   const dirOf = new Map<string, string>(); // directory -> folder id
@@ -103,9 +108,9 @@ export function fromFiles(files: Files, secrets?: WsSecrets): (WsParts & { skipp
   for (const p of paths) {
     if (!p.endsWith("/folder.json")) continue;
     const f = read<{ id?: string; name?: string; children?: string[] }>(p);
-    if (!f || typeof f.id !== "string") { if (f) skipped.push(p); continue; }
+    if (!f || !validId(f.id)) { if (f) skipped.push(p); continue; }
     const dir = p.slice(0, -"/folder.json".length);
-    folders.set(f.id, { id: f.id, name: String(f.name ?? dir.split("/").pop()), workspaceId: ws, parentId: null, children: Array.isArray(f.children) ? f.children.filter((x) => typeof x === "string") : [] });
+    folders.set(f.id, { id: f.id, name: String(f.name ?? dir.split("/").pop()), workspaceId: ws, parentId: null, children: Array.isArray(f.children) ? f.children.filter(validId) : [] });
     dirOf.set(dir, f.id);
   }
   const parentDir = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
@@ -119,7 +124,7 @@ export function fromFiles(files: Files, secrets?: WsSecrets): (WsParts & { skipp
     const dir = parentDir(p);
     if (!dirOf.has(dir)) continue; // not inside a folder of this workspace
     const r = read<Request>(p);
-    if (!r || typeof r.id !== "string" || typeof r.url !== "string") { if (r) skipped.push(p); continue; }
+    if (!r || !validId(r.id) || typeof r.url !== "string") { if (r) skipped.push(p); continue; }
     requests[r.id] = joinRequest(normalise(r), secrets?.req[r.id]);
     (inDir.get(dir) ?? inDir.set(dir, []).get(dir)!).push(r.id);
   }
@@ -134,7 +139,7 @@ export function fromFiles(files: Files, secrets?: WsSecrets): (WsParts & { skipp
   for (const p of paths) {
     if (!p.startsWith("environments/") || !p.endsWith(".json")) continue;
     const e = read<EnvShape>(p);
-    if (!e || typeof e.id !== "string" || !Array.isArray(e.vars)) { if (e) skipped.push(p); continue; }
+    if (!e || !validId(e.id) || !Array.isArray(e.vars)) { if (e) skipped.push(p); continue; }
     environments.push(joinEnv(e, ws, secrets?.env[e.id]));
   }
   // The collections in the order workspace.json gives, then any it does not list.

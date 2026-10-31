@@ -9,12 +9,26 @@
 import type { Environment, Request, Row } from "./httpclient";
 
 const isRef = (v: string) => /^\s*\{\{[^}]+\}\}\s*$/.test(v);
+
+/**
+ * Whether an id is one this plugin could have made (newId: letters and digits). An id from a folder
+ * or a teammate becomes part of a file's name and a key in the collections, so anything else (a
+ * path, "..", a huge string) is refused rather than trusted.
+ */
+export const validId = (s: unknown): s is string => typeof s === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(s);
+
+/** Where a request goes: its scheme and host, or what its address starts with when that is a
+ *  {{variable}}. A kept credential is only put back on a request that still goes there. */
+export const originOf = (url: string) =>
+  (/^\s*([a-z][a-z0-9+.-]*:\/\/[^/?#\s]+)/i.exec(url)?.[1] ?? url.trim().split(/[/?#]/)[0]).toLowerCase();
 /** A header whose value is a credential. */
 export const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|x-auth-token)$|token|secret|password|apikey|api_key/i;
 const keep = (v: string) => (isRef(v) ? v : "");
 
-/** A request's credentials, kept on this Deck: by header name (lower case) for headers. */
-export interface ReqSecrets { token?: string; pass?: string; headers?: Record<string, string> }
+/** A request's credentials, kept on this Deck: by header name (lower case) for headers, and the
+ *  `origin` they were for, so a teammate or a folder that points the request elsewhere does not
+ *  get them sent there. */
+export interface ReqSecrets { token?: string; pass?: string; headers?: Record<string, string>; origin?: string }
 
 /** A request without its credentials, and the credentials (null when it has none). */
 export function splitRequest(r: Request): { pub: Request; secret: ReqSecrets | null } {
@@ -27,12 +41,15 @@ export function splitRequest(r: Request): { pub: Request; secret: ReqSecrets | n
     (secret.headers ??= {})[h.key.toLowerCase()] = h.value;
     return { ...h, value: "" };
   });
-  return { pub: { ...r, auth, headers }, secret: Object.keys(secret).length ? secret : null };
+  return { pub: { ...r, auth, headers }, secret: Object.keys(secret).length ? { ...secret, origin: originOf(r.url) } : null };
 }
 
-/** A request with the credentials this Deck kept put back where the other copy has none. */
+/**
+ * A request with the credentials this Deck kept put back where the other copy has none: only while
+ * it still goes where they were for. One kept before origins were (no `origin`) goes back as before.
+ */
 export function joinRequest(r: Request, s: ReqSecrets | null | undefined): Request {
-  if (!s) return r;
+  if (!s || (s.origin !== undefined && s.origin !== originOf(r.url))) return r;
   let auth = r.auth;
   if (auth.kind === "bearer" && !auth.token && s.token) auth = { ...auth, token: s.token };
   if (auth.kind === "basic" && !auth.pass && s.pass) auth = { ...auth, pass: s.pass };

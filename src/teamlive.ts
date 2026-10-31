@@ -13,6 +13,7 @@ import { configRead, configWrite } from "../shim/bridge.js";
 import { loadCollections, readWorkspaceFolder, saveCollections, setSaveHook, withWorkspace, type Collections } from "./httpclient";
 import { onFolderChange } from "./folderstore";
 import { apply, behind, digest, localChanges, newerThan, recsFor, type Meta, type Rec } from "./teamsync";
+import { validId } from "./secrets";
 
 type Msg =
   | { t: "digest"; ws: string; d: Record<string, [number, string]>; ask: boolean }
@@ -62,7 +63,8 @@ function hello(team: string, m: Member) {
 }
 
 function onMsg(team: string, msg: Msg, from: Member) {
-  if (!col || stopped || !msg || typeof msg.ws !== "string") return;
+  if (!col || stopped || !msg || !validId(msg.ws)) return;
+  if (msg.t === "digest" && (!msg.d || typeof msg.d !== "object" || !Object.values(msg.d).every((v) => Array.isArray(v) && typeof v[0] === "number" && typeof v[1] === "string"))) return;
   const w = col.workspaces.find((x) => x.id === msg.ws);
   // A workspace of this Deck's that is not shared with this team is never touched by it, and one
   // this Deck had and deleted (its revisions are still kept) does not come back.
@@ -149,3 +151,23 @@ export function attachTab(f: (patch: (c: Collections) => Collections) => void): 
 
 /** Who is online in a workspace's team, for the line under its name. */
 export const teamOnline = (team: string): Member[] => chans.get(team)?.online() ?? [];
+
+/** The revisions of requests sent here since a teammate changed them, by "<ws>:<id>". */
+const acked = new Map<string, number>();
+
+/**
+ * Who last changed a request in a shared workspace, when that was a teammate and it has not been
+ * sent from here since: a teammate's change (its address, its scripts, a header) runs here with this
+ * Deck's environment values and credentials, so it is shown before it is sent. Null otherwise.
+ */
+export function teammateChange(id: string): { name: string; key: string; t: number } | null {
+  for (const [ws, m] of Object.entries(meta)) {
+    const e = m[`r:${id}`];
+    if (!e || e.del || (me && e.by === me) || acked.get(`${ws}:${id}`) === e.t) continue;
+    const name = teamsView().flatMap((t) => t.members).find((x) => x.id === e.by)?.name ?? "A teammate";
+    return { name, key: `${ws}:${id}`, t: e.t };
+  }
+  return null;
+}
+/** The person sending said yes to this version of the request: it is not asked about again. */
+export const acknowledge = (c: { key: string; t: number }) => void acked.set(c.key, c.t);

@@ -17,7 +17,7 @@ import {
 import { fileName, fromFiles, isWorkspace } from "./folderlayout";
 import { loadSecrets, onFolderChange, readFolder } from "./folderstore";
 import { subscribeTeams, teamsView, type TeamView } from "../shim/p2p.js";
-import { attachTab } from "./teamlive";
+import { acknowledge, attachTab, teammateChange } from "./teamlive";
 import {
   loadCollections, saveCollections, cancelRequest, envVars, newRequest, newId,
   loadHistory, saveHistory, paramsFromUrl, applyParamsToUrl, pathParamsFromUrl,
@@ -394,6 +394,17 @@ export default function Requests() {
   const send = useCallback(async () => {
     const t = tabs.find((x) => x.id === activeId);
     if (!t || !t.draft.url.trim() || sending[t.id]) return;
+    // A teammate's change to this request is shown before it runs here, with this Deck's secrets.
+    const change = teammateChange(t.draft.id);
+    if (change) {
+      const scripts = t.draft.preScript || t.draft.postScript ? ", and runs its scripts," : "";
+      setConfirm({
+        title: `${change.name} changed this request`, confirmLabel: "Send it", danger: false,
+        body: `It goes to ${t.draft.method} ${t.draft.url}${scripts} with your environment values and credentials. Send it?`,
+        onConfirm: () => { acknowledge(change); void send(); },
+      });
+      return;
+    }
     const sendId = newId();
     setSending((s) => ({ ...s, [t.id]: sendId }));
     setErrors((e) => ({ ...e, [t.id]: "" }));

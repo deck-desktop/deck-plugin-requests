@@ -9,8 +9,8 @@
 //
 // What never leaves this Deck is secrets.ts's to say (environment values, credentials). A record's
 // hash is of what is sent, so changing a secret here is not a change to send.
-import type { Collections, Folder, Request } from "./httpclient";
-import { joinRequest, splitEnv, splitRequest } from "./secrets";
+import type { Auth, BodyKind, Collections, Folder, Request, Row } from "./httpclient";
+import { joinRequest, splitEnv, splitRequest, validId } from "./secrets";
 
 export interface Rev { t: number; by: string }
 export interface MetaEntry extends Rev { h: string; del?: boolean }
@@ -86,12 +86,89 @@ export function recsFor(c: Collections, ws: string, meta: Meta, keys: string[]):
   });
 }
 
+// ---- what a record from another Deck may hold ----
+//
+// A teammate's Deck is trusted to be a teammate, not to be well-behaved: a record is rebuilt from
+// the fields it should have, of the types they should be, within sizes, or refused. Its revision may
+// not be from far in the future (it would win over every edit for good), and a form row that
+// uploads a file arrives without its path: a path names a file on the sender's machine, and sent
+// from here it would upload whatever this machine has there.
+
+/** How far ahead of this machine's clock a revision may be: clocks drift, but not by days. */
+const FUTURE = 10 * 60_000;
+const str = (v: unknown, max: number) => (typeof v === "string" && v.length <= max ? v : null);
+const METHODS = /^[A-Z]{1,16}$/;
+const BODY_KINDS: BodyKind[] = ["none", "json", "text", "form"];
+
+function rows(v: unknown, files: boolean): Row[] | null {
+  if (!Array.isArray(v) || v.length > 500) return null;
+  const out: Row[] = [];
+  for (const x of v) {
+    const key = str(x?.key, 1000), value = str(x?.value, 100_000);
+    if (key === null || value === null) return null;
+    const file = files && x.kind === "file";
+    out.push({ on: x.on !== false, key, value: file ? "" : value, ...(file ? { kind: "file" as const } : {}),
+      ...(file && str(x.filename, 300) ? { filename: x.filename } : {}), ...(file && str(x.contentType, 200) ? { contentType: x.contentType } : {}) });
+  }
+  return out;
+}
+
+function auth(v: unknown): Auth | null {
+  const a = v as { kind?: unknown; token?: unknown; user?: unknown; pass?: unknown } | null;
+  if (a?.kind === "none") return { kind: "none" };
+  if (a?.kind === "bearer") { const token = str(a.token, 10_000); return token === null ? null : { kind: "bearer", token }; }
+  if (a?.kind === "basic") { const user = str(a.user, 1000), pass = str(a.pass, 10_000); return user === null || pass === null ? null : { kind: "basic", user, pass }; }
+  return null;
+}
+
+function request(id: string, d: any): (Request & { parent: string | null }) | null {
+  const name = str(d?.name, 300), url = str(d?.url, 8000), method = str(d?.method, 16), body = str(d?.body ?? "", 5_000_000);
+  const headers = rows(d?.headers, false), params = rows(d?.params ?? [], false), pathParams = rows(d?.pathParams ?? [], false), formRows = rows(d?.formRows ?? [], true);
+  const a = auth(d?.auth ?? { kind: "none" });
+  const pre = d?.preScript === undefined ? "" : str(d.preScript, 200_000), post = d?.postScript === undefined ? "" : str(d.postScript, 200_000);
+  if (name === null || url === null || method === null || !METHODS.test(method) || body === null || !headers || !params || !pathParams
+    || !formRows || !a || pre === null || post === null || !BODY_KINDS.includes(d?.bodyKind)) return null;
+  const parent = d?.parent === null || d?.parent === undefined ? null : validId(d.parent) ? d.parent : undefined;
+  if (parent === undefined) return null;
+  return { id, name, method: method as Request["method"], url, headers, params, pathParams, bodyKind: d.bodyKind, body, formRows, auth: a,
+    ...(pre ? { preScript: pre } : {}), ...(post ? { postScript: post } : {}), parent };
+}
+
+/** A record from another Deck as this one will take it, or null when it is not one. */
+export function cleanRec(r: unknown, now: number): Rec | null {
+  const x = r as Rec | null;
+  if (!x || typeof x.k !== "string" || !x.rev || typeof x.rev.t !== "number" || !Number.isFinite(x.rev.t) || x.rev.t <= 0
+    || x.rev.t > now + FUTURE || str(x.rev.by, 64) === null || (x.del !== undefined && typeof x.del !== "boolean")) return null;
+  const rev = { t: x.rev.t, by: x.rev.by };
+  const [kind, id] = x.k === "w" ? ["w", ""] : x.k.split(/:(.*)/s);
+  if (kind !== "w" && !validId(id)) return null;
+  if (x.del) return kind === "w" ? null : { k: x.k, rev, del: true };
+  const d = x.d as any;
+  if (kind === "w") { const name = str(d?.name, 300); return name === null ? null : { k: "w", rev, d: { name } }; }
+  if (kind === "f") {
+    const name = str(d?.name, 300);
+    const parentId = d?.parentId === null || d?.parentId === undefined ? null : validId(d.parentId) ? d.parentId : undefined;
+    if (name === null || parentId === undefined || !Array.isArray(d?.children) || d.children.length > 5000 || !d.children.every(validId)) return null;
+    return { k: x.k, rev, d: { id, name, parentId, children: [...d.children] } };
+  }
+  if (kind === "r") { const req = request(id, d); return req ? { k: x.k, rev, d: req } : null; }
+  if (kind === "e") {
+    const name = str(d?.name, 300);
+    if (name === null || !Array.isArray(d?.vars) || d.vars.length > 1000) return null;
+    const vars = d.vars.map((v: any) => (str(v?.key, 1000) === null ? null : { on: v.on !== false, key: v.key }));
+    return vars.includes(null) ? null : { k: x.k, rev, d: { id, name, vars } };
+  }
+  return null;
+}
+
 /**
  * Take another Deck's records that are newer than this one's. A workspace this Deck does not have
  * yet is made, shared with `team`. What this Deck keeps for itself stays: a variable's value, and a
  * credential the other side did not send.
  */
-export function apply(c: Collections, ws: string, team: string, meta: Meta, recs: Rec[]): { col: Collections; meta: Meta; changed: boolean } {
+export function apply(c: Collections, ws: string, team: string, meta: Meta, given: unknown[], now = Date.now()): { col: Collections; meta: Meta; changed: boolean } {
+  // Only records that are what they say (cleanRec), and not more of them than a workspace holds.
+  const recs = given.slice(0, 20_000).flatMap((r) => cleanRec(r, now) ?? []);
   let col = c;
   const next: Meta = { ...meta };
   let changed = false;
