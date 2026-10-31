@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-10-31)
 
+- Share a workspace with a Deck team from the workspace menu: every member keeps it in step
+  whenever they are online together. Secrets (environment values, auth, credential headers) stay
+  on each Deck, and sending a request a teammate changed asks first. Needs Deck 1.14.0.
 - A shared workspace shows the team icon in the workspace menu, and only whoever shared it or the
   team's owner can stop sharing it or delete it for everyone.
 - The script worker is bundled by a `?worker` import rather than a deck-plugin.config.mjs, so the registry can
