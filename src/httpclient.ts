@@ -94,7 +94,14 @@ export interface Environment {
 }
 
 /** A top-level partition: its own collections, its own environments, its own active one. */
-export interface Workspace { id: string; name: string; activeEnvId: string | null }
+export interface Workspace {
+  id: string; name: string; activeEnvId: string | null;
+  /** Shared with this Deck team (teamsync.ts): kept in step with its members. */
+  teamId?: string;
+  /** The member who shared it: only they and the team's owner may stop sharing it or delete it for
+   *  everyone (teamsync.ts mayManage). */
+  owner?: string;
+}
 
 export interface Collections {
   workspaces: Workspace[];
@@ -174,8 +181,14 @@ export function migrate(c: Collections): Collections {
   return { ...c, workspaces, activeWorkspaceId, folders, environments };
 }
 
-export const saveCollections = (c: Collections) =>
-  configWrite(STORE, JSON.stringify(c, null, 2)).catch((e) => console.warn("[requests] collections save failed", e));
+let saveHook: ((c: Collections) => void) | null = null;
+/** Told of every save: team sync (teamlive.ts) sends what changed in a shared workspace. */
+export const setSaveHook = (f: ((c: Collections) => void) | null) => { saveHook = f; };
+
+export const saveCollections = (c: Collections) => {
+  saveHook?.(c);
+  return configWrite(STORE, JSON.stringify(c, null, 2)).catch((e) => console.warn("[requests] collections save failed", e));
+};
 
 // ---- tree ------------------------------------------------------------------
 //

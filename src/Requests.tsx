@@ -6,14 +6,16 @@
 //
 // Collections live in %APPDATA%\Deck\requests-collections.json, deliberately not in the open
 // project — requests carry tokens and internal hostnames.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "../shim/react-dom.js";
 import { onKeys, useScope } from "../shim/ui.js";
 import { notice, failure } from "./notice";
 import {
   Plus, Trash2, FolderPlus, Loader2, Search, Globe, X, Upload, TerminalSquare, Download,
-  FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft, Send,
+  FolderTree, History as HistoryIcon, Save, ChevronDown, Pencil, PanelLeft, Send, Users,
 } from "lucide-react";
+import { subscribeTeams, teamsView, type TeamView } from "../shim/p2p.js";
+import { acknowledge, attachTab, canManage, endSharing, teamMe, teammateChange } from "./teamlive";
 import {
   loadCollections, saveCollections, cancelRequest, envVars, newRequest, newId,
   loadHistory, saveHistory, paramsFromUrl, applyParamsToUrl, pathParamsFromUrl,
@@ -174,6 +176,39 @@ export default function Requests() {
     });
   };
 
+  // A teammate's change to a shared workspace lands here while the tab is open (teamlive.ts).
+  const updateRef = useRef(update);
+  updateRef.current = update;
+  // Only once its collections are loaded: before that, an update has no state to change.
+  const loaded = !!col;
+  useEffect(() => (loaded ? attachTab((f) => updateRef.current(f)) : undefined), [loaded]);
+  const teams = useSyncExternalStore(subscribeTeams, teamsView);
+
+  const shareTeam = useRef("");
+  const askShareWorkspace = (w: Workspace) => {
+    if (!teams.length) {
+      setConfirm({ title: "No team yet", acknowledge: true, onConfirm: () => {},
+        body: "Start a team or join one in Settings › Teams first, then share this workspace with it." });
+      return;
+    }
+    shareTeam.current = teams[0].id;
+    setConfirm({
+      title: `Share "${w.name}" with a team?`, confirmLabel: "Share", danger: false, wide: true,
+      body: (
+        <div className="flex flex-col gap-3 text-[12.5px] text-text-secondary">
+          <select defaultValue={teams[0].id} onChange={(e) => { shareTeam.current = e.target.value; }}
+            className="h-8 w-64 rounded-lg border border-subtle bg-elev px-2 text-[12.5px] text-text-primary">
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.members.length})</option>)}
+          </select>
+          <p>Every member gets this workspace and keeps it in step: its collections, folders and requests (addresses, params, headers, bodies and scripts) and its environments' variable names.</p>
+          <p>What stays on this Deck: environment values, auth tokens and passwords, and the values of headers like Authorization, Cookie and X-Api-Key, unless they are only a {"{{variable}}"}. Each member fills in their own. History is never shared.</p>
+        </div>
+      ),
+      onConfirm: () => void teamMe().then((me) => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, teamId: shareTeam.current, owner: me } : x)) })))
+        .catch((e) => console.warn("[requests] sharing the workspace failed", e)),
+    });
+  };
+
   const tab = tabs.find((t) => t.id === activeId) ?? null;
   const active = tab?.draft ?? null;
   const dirty = (t: Tab) => !t.saved || !sameRequest(t.draft, t.saved);
@@ -306,6 +341,17 @@ export default function Requests() {
   const send = useCallback(async () => {
     const t = tabs.find((x) => x.id === activeId);
     if (!t || !t.draft.url.trim() || sending[t.id]) return;
+    // A teammate's change to this request is shown before it runs here, with this Deck's secrets.
+    const change = teammateChange(t.draft.id);
+    if (change) {
+      const scripts = t.draft.preScript || t.draft.postScript ? ", and runs its scripts," : "";
+      setConfirm({
+        title: `${change.name} changed this request`, confirmLabel: "Send it", danger: false,
+        body: `It goes to ${t.draft.method} ${t.draft.url}${scripts} with your environment values and credentials. Send it?`,
+        onConfirm: () => { acknowledge(change); void send(); },
+      });
+      return;
+    }
     const sendId = newId();
     setSending((s) => ({ ...s, [t.id]: sendId }));
     setErrors((e) => ({ ...e, [t.id]: "" }));
@@ -474,8 +520,8 @@ export default function Requests() {
     setExportAsk({ scope: "collection", id, name });
   };
 
-  const exportWorkspaceFile = () => {
-    const ws = col?.workspaces.find((w) => w.id === col.activeWorkspaceId);
+  const exportWorkspaceFile = (id = col?.activeWorkspaceId) => {
+    const ws = col?.workspaces.find((w) => w.id === id);
     if (ws) setExportAsk({ scope: "workspace", id: ws.id, name: ws.name });
   };
 
@@ -653,10 +699,11 @@ export default function Requests() {
     const cols = col.folders.filter((f) => f.workspaceId === id && f.parentId === null).length;
     const envs = col.environments.filter((e) => e.workspaceId === id).length;
     setConfirm({
-      title: `Delete the workspace ${w.name}?`,
-      body: `This also deletes its ${n(cols, "collection")} and ${n(envs, "environment")}; your other workspaces stay.`,
+      title: w.teamId ? `Delete ${w.name} for everyone in the team?` : `Delete the workspace ${w.name}?`,
+      body: `This also deletes its ${n(cols, "collection")} and ${n(envs, "environment")}; your other workspaces stay.`
+        + (w.teamId ? " It goes from every member's Deck, as they come online." : ""),
       confirmLabel: "Delete",
-      onConfirm: () => deleteWorkspace(id),
+      onConfirm: () => { if (w.teamId) void endSharing(id, "delete"); deleteWorkspace(id); },
     });
   };
 
@@ -762,7 +809,10 @@ export default function Requests() {
                 onAdd={addWorkspace}
                 onRename={(id, name) => update((c) => ({ ...c, workspaces: c.workspaces.map((w) => (w.id === id ? { ...w, name } : w)) }))}
                 onDelete={askDeleteWorkspace}
-                onExport={exportWorkspaceFile}
+                teams={teams}
+                onShare={(w) => askShareWorkspace(w)}
+                onUnshare={(w) => void endSharing(w.id, "stop").then(() => update((c) => ({ ...c, workspaces: c.workspaces.map((x) => (x.id === w.id ? { ...x, teamId: undefined } : x)) })))}
+                onExport={(w) => exportWorkspaceFile(w.id)}
                 onImport={() => void importWorkspaceFile()}
                 onMenu={(x, y, items) => setMenu({ x, y, items, alignRight: true })}
               />
@@ -1136,7 +1186,7 @@ export default function Requests() {
  * without resizing it, which is the same drift the fixed slot exists to prevent.
  */
 function WorkspaceBar({
-  col, active, onSwitch, onAdd, onRename, onDelete, onExport, onImport, onMenu,
+  col, active, onSwitch, onAdd, onRename, onDelete, teams, onShare, onUnshare, onExport, onImport, onMenu,
 }: {
   col: Collections;
   active: Workspace | null;
@@ -1144,7 +1194,10 @@ function WorkspaceBar({
   onAdd: () => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onExport: () => void;
+  teams: TeamView[];
+  onShare: (w: Workspace) => void;
+  onUnshare: (w: Workspace) => void;
+  onExport: (w: Workspace) => void;
   onImport: () => void;
   onMenu: (x: number, y: number, items: MenuEntry[]) => void;
 }) {
@@ -1153,6 +1206,9 @@ function WorkspaceBar({
     title: "Rename workspace", initial: w.name, confirmLabel: "Rename",
     onSave: (name) => onRename(w.id, name),
   });
+  // The team this workspace is shared with, and how many of its others are online.
+  const teamOf = active?.teamId ? teams.find((t) => t.id === active.teamId) : undefined;
+  const online = teamOf ? teamOf.members.filter((m) => m.online && !m.me).length : 0;
 
   return (
     <>
@@ -1160,26 +1216,42 @@ function WorkspaceBar({
         onClick={(e) => {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           onMenu(r.right, r.bottom, [
-            ...col.workspaces.map((w) => ({
-              label: w.name,
-              dot: w.id === active?.id ? ("ok" as const) : undefined,
-              onClick: () => onSwitch(w.id),
-            })),
+            // Each workspace: a click goes to it, and its own menu (hover) is what can be done to it.
+            ...col.workspaces.map((w) => {
+              const team = w.teamId ? teams.find((t) => t.id === w.teamId) : undefined;
+              return {
+                label: w.name,
+                // Shared with a team: the same icon as beside the workspace's name.
+                ...(w.teamId ? { icon: Users } : {}),
+                hint: w.id === active?.id ? "●" : undefined,
+                onClick: () => onSwitch(w.id),
+                children: [
+                  { label: "Rename…", icon: Pencil, onClick: () => rename(w) },
+                  // A shared workspace's sharer and the team's owner may stop sharing it or delete it for
+                  // everyone; the other members keep it, and say who shared it.
+                  ...(w.teamId
+                    ? canManage(w) ? [{ label: `Stop sharing with ${team?.name ?? "the team"}`, icon: Users, onClick: () => onUnshare(w) }] : []
+                    : [{ label: "Share with a team…", icon: Users, onClick: () => onShare(w) }]),
+                  { label: "Export…", icon: Download, onClick: () => onExport(w) },
+                  // The last workspace cannot go: with none left there is nowhere to put a request.
+                  ...(col.workspaces.length > 1 && (!w.teamId || canManage(w)) ? ["sep" as const, { label: "Delete", icon: Trash2, danger: true, onClick: () => onDelete(w.id) }] : []),
+                ],
+              };
+            }),
             "sep" as const,
             { label: "New workspace", icon: Plus, onClick: onAdd },
-            ...(active ? [{ label: "Rename workspace", icon: Pencil, onClick: () => rename(active) }] : []),
-            ...(active ? [{ label: "Export workspace…", icon: Download, onClick: onExport }] : []),
-            { label: "Import workspace…", icon: Upload, onClick: onImport },
-            // The last workspace cannot go: with none left there is nowhere to put a request.
-            ...(active && col.workspaces.length > 1
-              ? [{ label: `Delete "${active.name}"`, icon: Trash2, danger: true, onClick: () => onDelete(active.id) }]
-              : []),
+            { label: "Import a workspace file…", icon: Upload, onClick: onImport },
           ]);
         }}
         className="flex h-7 min-w-0 items-center gap-1 rounded-lg px-2 text-[12px] text-text-primary transition-colors hover:bg-white/5"
         title="Switch workspace"
       >
         <span className="max-w-[110px] truncate font-medium">{active?.name ?? "No workspace"}</span>
+        {teamOf && (
+          <span className="flex items-center gap-0.5 text-[11px] text-text-muted" title={`Shared with ${teamOf.name}: ${online} other${online === 1 ? "" : "s"} online`}>
+            <Users size={11} />{online}
+          </span>
+        )}
         <ChevronDown size={12} className="shrink-0 text-text-muted" />
       </button>
 

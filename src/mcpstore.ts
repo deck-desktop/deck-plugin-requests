@@ -55,7 +55,7 @@ export interface Environment {
   workspaceId: string;
 }
 
-export interface Workspace { id: string; name: string; activeEnvId: string | null }
+export interface Workspace { id: string; name: string; activeEnvId: string | null; teamId?: string; owner?: string }
 
 export interface Collections {
   workspaces: Workspace[];

@@ -9,6 +9,10 @@ import { Row } from "../shim/ui.js";
 import Requests from "./Requests";
 import { stopHttpSend } from "./httpsend";
 import { releaseWorker } from "./httpscript";
+import { startTeamSync, stopTeamSync } from "./teamlive";
+
+// Workspaces shared with a Deck team keep in step while the tab is closed too.
+void startTeamSync().catch((e) => console.warn("[requests] starting team sync failed", e));
 
 export const PaneView = () => <Requests />;
 
@@ -36,6 +40,7 @@ export function Settings() {
 }
 
 export function dispose() {
+  stopTeamSync();
   void stopHttpSend.then((f) => { if (f) f(); });
   releaseWorker();
 }
