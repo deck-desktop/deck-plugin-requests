@@ -5,7 +5,7 @@
  * so without it the returned promise would never settle and the send would hang forever.
  */
 import type { ScriptContext, ScriptResult } from "./httpscript.pm";
-import workerCode from "virtual:httpscript-worker";
+import workerCode from "./httpscript.worker.ts?worker";
 
 // One blob for the plugin's life; each run still gets a fresh Worker from it, so nothing a script
 // leaves behind reaches the next. Released by dispose() in plugin.tsx.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The script worker is bundled by a `?worker` import rather than a deck-plugin.config.mjs, so the registry can
+  rebuild and type-check it. Nothing changes in the plugin itself.
+
 ## 1.1.4 (2026-10-30)
 
 - A licence, this changelog, a README rewritten with a screenshot, and the permissions it uses

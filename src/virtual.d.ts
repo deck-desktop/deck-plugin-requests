@@ -1,5 +1,6 @@
-// The script worker's bundled source, made by build.mjs (see httpscript.ts).
-declare module "virtual:httpscript-worker" {
+// `import code from "./x.worker.ts?worker"`: that worker, bundled by the SDK's build, as the text
+// of a script (see httpscript.ts).
+declare module "*?worker" {
   const code: string;
   export default code;
 }
