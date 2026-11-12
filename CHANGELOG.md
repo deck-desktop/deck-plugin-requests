@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 (2026-11-12)
+
+- A workspace shared with a team catches up every 2 minutes, so a change missed while a connection
+  dropped arrives without reopening it.
+
 ## 1.2.0 (2026-10-31)
 
 - Share a workspace with a Deck team from the workspace menu: every member keeps it in step
