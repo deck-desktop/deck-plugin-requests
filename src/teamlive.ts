@@ -29,6 +29,9 @@ let me = "";
 let stopped = false;
 let loadedMeta = false;
 let unTeams: (() => void) | null = null;
+/** The catch-up run again now and then: a change whose message was lost on the way still arrives. */
+const CATCH_UP = 2 * 60_000;
+let catchUp: ReturnType<typeof setInterval> | null = null;
 // Typed loosely: a record's data is whatever JSON the record holds.
 const chans = new Map<string, TeamChannel<any>>();
 /** The open tab's way in: it applies a change to its own state, then saves it. */
@@ -79,6 +82,7 @@ function onMsg(team: string, msg: Msg, from: Member) {
     if (msg.ask && behind(m, msg.d)) void ch?.send({ t: "digest", ws: msg.ws, d: digest(m), ask: false }, from.id);
   } else if (msg.t === "recs" && Array.isArray(msg.recs)) {
     const teamOwner = teamsView().find((t) => t.id === team)?.ownerId;
+    aheadOf(from, msg.recs);
     const r = apply(col, msg.ws, team, m, msg.recs, Date.now(), teamOwner);
     if (!r.changed) return;
     meta[msg.ws] = r.meta;
@@ -89,6 +93,19 @@ function onMsg(team: string, msg: Msg, from: Member) {
     if (tab) tab((c) => apply(c, msg.ws, team, m, msg.recs, Date.now(), teamOwner).col);
     else void saveCollections(r.col);
   }
+}
+
+/**
+ * A record dated more than ten minutes ahead of this machine is refused (cleanRec): the sender's clock
+ * is wrong. Said once per member, since nothing else shows why their changes do not arrive; the
+ * catch-up takes them once the clocks agree.
+ */
+const toldAhead = new Set<string>();
+function aheadOf(from: Member, recs: Rec[]) {
+  const t = Math.max(0, ...recs.map((x) => (typeof x?.rev?.t === "number" ? x.rev.t : 0)));
+  if (t <= Date.now() + 10 * 60_000 || toldAhead.has(from.id)) return;
+  toldAhead.add(from.id);
+  console.warn(`[requests] ${from.name}'s clock is ${Math.round((t - Date.now()) / 60_000)} minutes ahead of this one: their changes are not taken until the clocks agree`);
 }
 
 /** Every save, from the tab or here: what changed in a shared workspace goes to those online. */
@@ -127,6 +144,8 @@ export async function startTeamSync() {
   // Joining or leaving a team opens or closes its channel; the teams already joined, now.
   unTeams = subscribeTeams(() => channels());
   channels();
+  // Only digests go (a revision per record): what differs is sent by whichever side has it newer.
+  catchUp = setInterval(() => { for (const [team, ch] of chans) for (const m of ch.online()) hello(team, m); }, CATCH_UP);
   // Edits made while no one was connected (or before this ran) are counted now.
   saved(col ?? c);
 }
@@ -134,6 +153,8 @@ export async function startTeamSync() {
 export function stopTeamSync() {
   stopped = true;
   setSaveHook(null);
+  if (catchUp) clearInterval(catchUp);
+  catchUp = null;
   unTeams?.();
   unTeams = null;
   for (const ch of chans.values()) ch.close();
